@@ -755,13 +755,33 @@ function ContactApp({ notify }: { notify: (text: string, tone?: Notification["to
     event.preventDefault();
     if (!validate()) { setStatus("Please review the highlighted fields."); return; }
     setSubmitting(true);
-    window.setTimeout(() => {
-      setSubmitting(false);
-      setStatus("Delivery endpoint is not configured yet. Your message was not sent.");
-      notify("Transmission needs a configured form endpoint.", "warning");
-    }, 650);
+    const endpoint = process.env.NEXT_PUBLIC_FORMSPREE_ENDPOINT;
+    if (!endpoint) {
+      window.setTimeout(() => {
+        setSubmitting(false);
+        setStatus("Delivery endpoint is not configured yet. Your message was not sent.");
+        notify("Transmission needs a configured form endpoint.", "warning");
+      }, 650);
+      return;
+    }
+    void fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(values),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("The delivery provider rejected the request.");
+        setStatus("Transmission delivered. Thank you — Stephen will be in touch.");
+        setValues({ name: "", email: "", subject: "", message: "" });
+        notify("Transmission delivered successfully.");
+      })
+      .catch(() => {
+        setStatus("The delivery service could not be reached. Your message was not sent.");
+        notify("Transmission failed. Please try again later.", "warning");
+      })
+      .finally(() => setSubmitting(false));
   };
-  return <div className="contact-app app-pad"><div className="contact-heading"><div><p className="eyebrow">COMMUNICATION UPLINK</p><h2>Start a conversation.</h2><p>Connection status: <b><i /> AVAILABLE</b></p></div><div className="contact-meta"><span>CHANNEL / CONTACT FORM</span><span>DELIVERY / CONFIGURE ENDPOINT</span></div></div><form className="contact-form" onSubmit={submit} noValidate><div className="form-grid"><Field label="Your name" name="name" value={values.name} error={errors.name} onChange={(value) => setValues({ ...values, name: value })} /><Field label="Email address" name="email" type="email" value={values.email} error={errors.email} onChange={(value) => setValues({ ...values, email: value })} /></div><Field label="Subject" name="subject" value={values.subject} error={errors.subject} onChange={(value) => setValues({ ...values, subject: value })} /><Field label="Message" name="message" value={values.message} error={errors.message} onChange={(value) => setValues({ ...values, message: value })} textarea /><div className="contact-submit"><span>{status || "Client-side validation is active. No message is sent until a delivery endpoint is configured."}</span><button type="submit" disabled={submitting}>{submitting ? "Validating…" : "Prepare transmission ↗"}</button></div></form><div className="contact-rail"><button onClick={async () => { try { await navigator.clipboard.writeText(profile.email); notify("Contact email copied."); } catch { notify(profile.email); } }}>Copy contact email</button><span>{profile.email}</span></div></div>;
+  return <div className="contact-app app-pad"><div className="contact-heading"><div><p className="eyebrow">COMMUNICATION UPLINK</p><h2>Start a conversation.</h2><p>Connection status: <b><i /> AVAILABLE</b></p></div><div className="contact-meta"><span>CHANNEL / CONTACT FORM</span><span>DELIVERY / {process.env.NEXT_PUBLIC_FORMSPREE_ENDPOINT ? "CONNECTED" : "CONFIGURE ENDPOINT"}</span></div></div><form className="contact-form" onSubmit={submit} noValidate><div className="form-grid"><Field label="Your name" name="name" value={values.name} error={errors.name} onChange={(value) => setValues({ ...values, name: value })} /><Field label="Email address" name="email" type="email" value={values.email} error={errors.email} onChange={(value) => setValues({ ...values, email: value })} /></div><Field label="Subject" name="subject" value={values.subject} error={errors.subject} onChange={(value) => setValues({ ...values, subject: value })} /><Field label="Message" name="message" value={values.message} error={errors.message} onChange={(value) => setValues({ ...values, message: value })} textarea /><div className="contact-submit"><span>{status || "Client-side validation is active. No message is sent until a delivery endpoint is configured."}</span><button type="submit" disabled={submitting}>{submitting ? "Sending…" : "Prepare transmission ↗"}</button></div></form><div className="contact-rail"><button onClick={async () => { try { await navigator.clipboard.writeText(profile.email); notify("Contact email copied."); } catch { notify(profile.email); } }}>Copy contact email</button><span>{profile.email}</span></div></div>;
 }
 
 function Field({ label, name, value, error, onChange, type = "text", textarea = false }: { label: string; name: string; value: string; error?: string; onChange: (value: string) => void; type?: string; textarea?: boolean }) {
