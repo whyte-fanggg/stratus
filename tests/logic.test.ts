@@ -5,6 +5,7 @@ import { monthOverMonth, parseAwsBillText, parseUsdToCents } from "../services/b
 import { STRATUS_CLIENTS, STRATUS_REGIONS, SYNC_INTERVALS } from "../services/config.ts";
 import { inferResourceRole } from "../services/aws/read-only-adapter.ts";
 import { shouldRetainObservedAt } from "../services/retention.ts";
+import { allowsAdministrator, parseIamPolicyDocument } from "../services/api/src/iam-policy.ts";
 
 test("central configuration contains exactly the requested clients and regions", () => {
   assert.deepEqual(STRATUS_CLIENTS.map((client) => client.name), ["Nilkamal", "GCPL", "Swastiks", "Fusion"]);
@@ -31,6 +32,13 @@ test("AWS bill parser validates period, totals, account, and tax", () => {
 test("resource interpretation uses evidence and a safe fallback", () => {
   assert.equal(inferResourceRole({ Environment: "Production" }, "orders-db"), "Production Database");
   assert.equal(inferResourceRole({}, "mystery-01"), "Unclassified EC2 Instance");
+});
+
+test("IAM administrator evaluation requires wildcard action and resource evidence", () => {
+  const admin = parseIamPolicyDocument(encodeURIComponent(JSON.stringify({ Version: "2012-10-17", Statement: { Effect: "Allow", Action: "*", Resource: "*" } })));
+  assert.equal(allowsAdministrator(admin), true);
+  assert.equal(allowsAdministrator({ Statement: { Effect: "Allow", Action: "iam:*", Resource: "*" } }), false);
+  assert.equal(allowsAdministrator({ Statement: { Effect: "Deny", Action: "*", Resource: "*" } }), false);
 });
 
 test("backup freshness includes grace and unknown states", () => {

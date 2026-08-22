@@ -34,7 +34,7 @@ Prerequisites:
 - Docker Desktop or Docker Engine with Compose
 
 ```powershell
-Copy-Item .env.example .env.local
+Copy-Item .env.example .env
 npm install
 npm run dev
 ```
@@ -64,9 +64,8 @@ The browser calls the same-origin `/api/aws/status` route. That route proxies to
 
 ```text
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
-AI_PROVIDER=
-AI_API_KEY=
-AI_MODEL=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.4-mini
 AWS_CONFIG_DIR=/home/your-user/.aws
 AWS_PROFILE_NILKAMAL=nilkamal
 AWS_PROFILE_GCPL=gcpl
@@ -74,7 +73,16 @@ AWS_PROFILE_SWASTIKS=swastiks
 AWS_PROFILE_FUSION=fusion
 ```
 
-Never place AWS access keys, passwords, tokens, or AI API keys in source control. Stratus expects credentials to remain in the normal host AWS configuration files.
+Put the OpenAI API key in the ignored `.env` file at the repository root:
+
+```text
+OPENAI_API_KEY=your-key-here
+OPENAI_MODEL=gpt-5.4-mini
+```
+
+Docker Compose passes those values only to the server-side `stratus-web` container. Never prefix the key with `NEXT_PUBLIC_`, put it in browser code, or commit the `.env` file. After changing it, rebuild the web container with `docker compose up -d --build stratus-web`.
+
+Never place AWS access keys, passwords, tokens, or AI API keys in source control. Stratus expects AWS credentials to remain in the normal host AWS configuration files.
 
 ## AWS profile mapping
 
@@ -138,6 +146,7 @@ Security controls include:
 - prepared relational queries through D1/Drizzle
 - CSP, frame denial, MIME sniffing protection, restrictive permissions policy, and referrer policy
 - external AI key optional; the rest of Stratus works without it
+- OpenAI Responses API calls run only on the server, use `store: false`, and receive a curated source snapshot
 - read-only AI and AWS interfaces
 
 ## Quality commands
@@ -166,4 +175,4 @@ Development data, migrations, and application code travel with the repository. S
 
 All four required named profiles were verified with AWS STS on August 22, 2026, and each returned the expected client account. Docker Desktop 4.87.0, Engine 29.7.2, and Compose 5.4.0 were also verified. The Dockerized connector now exposes that validation safely to Stratus.
 
-Profile validation is not the same as a completed resource-inventory sync. Live EC2, Backup, VPC, IAM, S3, CloudWatch, and Cost Explorer records remain unavailable until their read-only discovery collectors are run and persisted. The hosted Sites runtime cannot read a workstation's local `.aws` directory; use the Docker stack on the profile-owning machine, or provide an approved private connector for hosted synchronization. Nilkamal also lacks a supplied infrastructure baseline, so its initial stored view contains billing history only.
+The local Docker connector discovers live EC2/EBS, VPC addressing, S3 object metadata, AWS Backup, and IAM policy evidence. CloudWatch and Cost Explorer collectors are still future work. The hosted Sites runtime cannot read a workstation's local `.aws` directory; use the Docker stack on the profile-owning machine, or provide an approved private connector for hosted synchronization. Nilkamal also lacks a supplied infrastructure baseline, so its non-live fallback contains billing history only.

@@ -1,13 +1,15 @@
 import express from "express";
 import { BackupClient, ListBackupJobsCommand, ListBackupPlansCommand, ListBackupVaultsCommand } from "@aws-sdk/client-backup";
 import { DescribeInstancesCommand, DescribeInstanceTypesCommand, DescribeVolumesCommand, EC2Client, type Instance, type InstanceTypeInfo, type Volume } from "@aws-sdk/client-ec2";
+import { GetGroupPolicyCommand, GetPolicyCommand, GetPolicyVersionCommand, GetUserPolicyCommand, IAMClient, ListAccessKeysCommand, ListAttachedGroupPoliciesCommand, ListAttachedUserPoliciesCommand, ListGroupPoliciesCommand, ListGroupsForUserCommand, ListMFADevicesCommand, ListUserPoliciesCommand, ListUsersCommand } from "@aws-sdk/client-iam";
 import { GetBucketLocationCommand, ListBucketsCommand, ListObjectsV2Command, S3Client, type _Object as S3Object } from "@aws-sdk/client-s3";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 import { fromIni } from "@aws-sdk/credential-providers";
+import { allowsAdministrator, parseIamPolicyDocument } from "./iam-policy.js";
 
 type ClientProfile = { client: string; profile: string; expectedAccountId: string };
 type ProfileCheck = ClientProfile & { connected: boolean; accountId: string | null; accountMatches: boolean; checkedAt: string; errorCode: string | null };
-type DiscoveryError = { service: "EC2" | "S3" | "AWS Backup"; region: string; code: string };
+type DiscoveryError = { service: "EC2" | "S3" | "AWS Backup" | "IAM"; region: string; code: string };
 type DiscoveredVolume = { volumeId: string; sizeGiB: number | null; type: string | null; state: string | null; encrypted: boolean };
 type DiscoveredInstance = {
   instanceId: string; name: string; state: string; instanceType: string; availabilityZone: string; region: string;
@@ -19,9 +21,15 @@ type DiscoveredBucket = {
   name: string; region: string; createdAt: string | null; objectsObserved: number; scanTruncated: boolean;
   latestObjects: Array<{ key: string; lastModified: string | null; sizeBytes: number; storageClass: string | null }>;
 };
+type DiscoveredIamUser = {
+  userName: string; arn: string; createdAt: string | null; passwordLastUsedAt: string | null;
+  attachedPolicies: string[]; inlinePolicies: string[]; groups: string[]; groupPolicies: string[];
+  mfaDeviceCount: number; accessKeys: Array<{ accessKeyId: string; status: string; createdAt: string | null }>;
+  administratorAccess: boolean; administratorEvidence: string[]; policyEvaluationComplete: boolean;
+};
 type ProfileInventory = {
   client: string; profile: string; accountId: string | null; discoveredAt: string;
-  instances: DiscoveredInstance[]; buckets: DiscoveredBucket[];
+  instances: DiscoveredInstance[]; buckets: DiscoveredBucket[]; iamUsers: DiscoveredIamUser[];
   backupVaults: Array<{ name: string; region: string; recoveryPoints: number; createdAt: string | null; locked: boolean }>;
   backupPlans: Array<{ id: string; name: string; region: string; createdAt: string | null; lastExecutionAt: string | null }>;
   backupJobs: Array<{ id: string; state: string; resourceType: string; resourceArn: string; vaultName: string; region: string; createdAt: string | null; completedAt: string | null; sizeBytes: number; statusMessage: string | null }>;
@@ -151,6 +159,106 @@ async function discoverBackup(profile: string, region: string) {
   };
 }
 
+type GroupPolicyData = {
+  name: string;
+  attached: Array<{ name: string; arn: string }>;
+  inline: Array<{ name: string; document: unknown }>;
+};
+
+async function discoverIam(profile: string): Promise<DiscoveredIamUser[]> {
+  const client = new IAMClient({ region: defaultRegion, credentials: credentials(profile) });
+  const usersResponse = await client.send(new ListUsersCommand({ MaxItems: 1000 }));
+  const groupCache = new Map<string, Promise<GroupPolicyData>>();
+  const readGroup = (name: string) => {
+    const cached = groupCache.get(name);
+    if (cached) return cached;
+    const pending = (async () => {
+      const [attachedResponse, inlineResponse] = await Promise.all([
+        client.send(new ListAttachedGroupPoliciesCommand({ GroupName: name, MaxItems: 1000 })),
+        client.send(new ListGroupPoliciesCommand({ GroupName: name, MaxItems: 1000 })),
+      ]);
+      const inlineNames = inlineResponse.PolicyNames ?? [];
+      const inlineDocuments = await Promise.all(inlineNames.map(async (policyName) => {
+        const response = await client.send(new GetGroupPolicyCommand({ GroupName: name, PolicyName: policyName }));
+        return { name: policyName, document: parseIamPolicyDocument(response.PolicyDocument) };
+      }));
+      return {
+        name,
+        attached: (attachedResponse.AttachedPolicies ?? []).filter((policy) => policy.PolicyArn).map((policy) => ({ name: policy.PolicyName ?? policy.PolicyArn!, arn: policy.PolicyArn! })),
+        inline: inlineDocuments,
+      };
+    })();
+    groupCache.set(name, pending);
+    return pending;
+  };
+
+  const rawUsers = await Promise.all((usersResponse.Users ?? []).filter((user) => user.UserName).map(async (user) => {
+    const userName = user.UserName!;
+    const [attachedResponse, inlineResponse, groupsResponse, mfaResponse, keysResponse] = await Promise.all([
+      client.send(new ListAttachedUserPoliciesCommand({ UserName: userName, MaxItems: 1000 })),
+      client.send(new ListUserPoliciesCommand({ UserName: userName, MaxItems: 1000 })),
+      client.send(new ListGroupsForUserCommand({ UserName: userName, MaxItems: 1000 })),
+      client.send(new ListMFADevicesCommand({ UserName: userName, MaxItems: 1000 })),
+      client.send(new ListAccessKeysCommand({ UserName: userName, MaxItems: 1000 })),
+    ]);
+    const inlineNames = inlineResponse.PolicyNames ?? [];
+    const [inline, groups] = await Promise.all([
+      Promise.all(inlineNames.map(async (policyName) => {
+        const response = await client.send(new GetUserPolicyCommand({ UserName: userName, PolicyName: policyName }));
+        return { name: policyName, document: parseIamPolicyDocument(response.PolicyDocument) };
+      })),
+      Promise.all((groupsResponse.Groups ?? []).filter((group) => group.GroupName).map((group) => readGroup(group.GroupName!))),
+    ]);
+    return {
+      user,
+      attached: (attachedResponse.AttachedPolicies ?? []).filter((policy) => policy.PolicyArn).map((policy) => ({ name: policy.PolicyName ?? policy.PolicyArn!, arn: policy.PolicyArn! })),
+      inline,
+      groups,
+      mfaDeviceCount: mfaResponse.MFADevices?.length ?? 0,
+      accessKeys: (keysResponse.AccessKeyMetadata ?? []).filter((key) => key.AccessKeyId).map((key) => ({ accessKeyId: key.AccessKeyId!, status: key.Status ?? "Unknown", createdAt: iso(key.CreateDate) })),
+    };
+  }));
+
+  const managedPolicies = new Map<string, string>();
+  for (const item of rawUsers) {
+    for (const policy of item.attached) managedPolicies.set(policy.arn, policy.name);
+    for (const group of item.groups) for (const policy of group.attached) managedPolicies.set(policy.arn, policy.name);
+  }
+  const managedDocuments = new Map<string, unknown>();
+  const failedManagedPolicies = new Set<string>();
+  await Promise.all([...managedPolicies.keys()].map(async (arn) => {
+    try {
+      const policy = await client.send(new GetPolicyCommand({ PolicyArn: arn }));
+      if (!policy.Policy?.DefaultVersionId) throw new Error("Managed policy has no default version.");
+      const version = await client.send(new GetPolicyVersionCommand({ PolicyArn: arn, VersionId: policy.Policy.DefaultVersionId }));
+      managedDocuments.set(arn, parseIamPolicyDocument(version.PolicyVersion?.Document));
+    } catch {
+      failedManagedPolicies.add(arn);
+    }
+  }));
+
+  return rawUsers.map((item) => {
+    const evidence: string[] = [];
+    for (const policy of item.attached) {
+      if (policy.name === "AdministratorAccess" || allowsAdministrator(managedDocuments.get(policy.arn))) evidence.push(`Direct managed policy: ${policy.name}`);
+    }
+    for (const policy of item.inline) if (allowsAdministrator(policy.document)) evidence.push(`Direct inline policy: ${policy.name}`);
+    for (const group of item.groups) {
+      for (const policy of group.attached) {
+        if (policy.name === "AdministratorAccess" || allowsAdministrator(managedDocuments.get(policy.arn))) evidence.push(`Group ${group.name} managed policy: ${policy.name}`);
+      }
+      for (const policy of group.inline) if (allowsAdministrator(policy.document)) evidence.push(`Group ${group.name} inline policy: ${policy.name}`);
+    }
+    return {
+      userName: item.user.UserName!, arn: item.user.Arn ?? "", createdAt: iso(item.user.CreateDate), passwordLastUsedAt: iso(item.user.PasswordLastUsed),
+      attachedPolicies: item.attached.map((policy) => policy.name), inlinePolicies: item.inline.map((policy) => policy.name),
+      groups: item.groups.map((group) => group.name), groupPolicies: item.groups.flatMap((group) => [...group.attached.map((policy) => policy.name), ...group.inline.map((policy) => policy.name)]),
+      mfaDeviceCount: item.mfaDeviceCount, accessKeys: item.accessKeys, administratorAccess: evidence.length > 0,
+      administratorEvidence: evidence, policyEvaluationComplete: [...item.attached, ...item.groups.flatMap((group) => group.attached)].every((policy) => !failedManagedPolicies.has(policy.arn)),
+    };
+  }).sort((left, right) => left.userName.localeCompare(right.userName));
+}
+
 async function discoverProfile(definition: ClientProfile, check: ProfileCheck): Promise<ProfileInventory> {
   const errors: DiscoveryError[] = [];
   const instances: DiscoveredInstance[] = [];
@@ -158,6 +266,7 @@ async function discoverProfile(definition: ClientProfile, check: ProfileCheck): 
   const backupPlans: ProfileInventory["backupPlans"] = [];
   const backupJobs: ProfileInventory["backupJobs"] = [];
   let buckets: DiscoveredBucket[] = [];
+  let iamUsers: DiscoveredIamUser[] = [];
   if (check.connected) {
     await Promise.all(regions.map(async (region) => {
       const [ec2, backup] = await Promise.allSettled([discoverEc2(definition.profile, region), discoverBackup(definition.profile, region)]);
@@ -166,10 +275,11 @@ async function discoverProfile(definition: ClientProfile, check: ProfileCheck): 
       else errors.push({ service: "AWS Backup", region, code: safeErrorCode(backup.reason) });
     }));
     try { buckets = await discoverS3(definition.profile); } catch (error) { errors.push({ service: "S3", region: "global", code: safeErrorCode(error) }); }
+    try { iamUsers = await discoverIam(definition.profile); } catch (error) { errors.push({ service: "IAM", region: "global", code: safeErrorCode(error) }); }
   }
   return {
     client: definition.client, profile: definition.profile, accountId: check.accountId, discoveredAt: new Date().toISOString(),
-    instances: instances.sort((left, right) => left.name.localeCompare(right.name)), buckets: buckets.sort((left, right) => left.name.localeCompare(right.name)),
+    instances: instances.sort((left, right) => left.name.localeCompare(right.name)), buckets: buckets.sort((left, right) => left.name.localeCompare(right.name)), iamUsers,
     backupVaults, backupPlans, backupJobs: backupJobs.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")), errors,
   };
 }

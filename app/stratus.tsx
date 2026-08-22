@@ -28,11 +28,18 @@ type LiveBucket = {
   name: string; region: string; createdAt: string | null; objectsObserved: number; scanTruncated: boolean;
   latestObjects: Array<{ key: string; lastModified: string | null; sizeBytes: number; storageClass: string | null }>;
 };
+type LiveIamUser = {
+  userName: string; arn: string; createdAt: string | null; passwordLastUsedAt: string | null;
+  attachedPolicies: string[]; inlinePolicies: string[]; groups: string[]; groupPolicies: string[];
+  mfaDeviceCount: number; accessKeys: Array<{ accessKeyId: string; status: string; createdAt: string | null }>;
+  administratorAccess: boolean; administratorEvidence: string[]; policyEvaluationComplete: boolean;
+};
 type AwsProfileInventory = {
   client: ClientName; profile: string; accountId: string | null; discoveredAt: string; instances: LiveInstance[]; buckets: LiveBucket[];
   backupVaults: Array<{ name: string; region: string; recoveryPoints: number; createdAt: string | null; locked: boolean }>;
   backupPlans: Array<{ id: string; name: string; region: string; createdAt: string | null; lastExecutionAt: string | null }>;
   backupJobs: Array<{ id: string; state: string; resourceType: string; resourceArn: string; vaultName: string; region: string; createdAt: string | null; completedAt: string | null; sizeBytes: number; statusMessage: string | null }>;
+  iamUsers: LiveIamUser[];
   errors: Array<{ service: string; region: string; code: string }>;
 };
 type AwsInventoryState = { state: "loading" | "ready" | "unavailable"; profiles: AwsProfileInventory[]; reason?: string };
@@ -108,6 +115,8 @@ export function StratusApp() {
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState("");
+  const [assistantPending, setAssistantPending] = useState(false);
+  const [assistantConfig, setAssistantConfig] = useState<{ configured: boolean; model: string } | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
   const [syncOpen, setSyncOpen] = useState(false);
@@ -131,6 +140,15 @@ export function StratusApp() {
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    if (!assistantOpen) return;
+    let active = true;
+    void fetch("/api/ai/ask", { cache: "no-store" }).then((response) => response.json()).then((data: { configured?: boolean; model?: string }) => {
+      if (active) setAssistantConfig({ configured: Boolean(data.configured), model: data.model ?? "gpt-5.4-mini" });
+    }).catch(() => { if (active) setAssistantConfig({ configured: false, model: "gpt-5.4-mini" }); });
+    return () => { active = false; };
+  }, [assistantOpen]);
+
   const navigate = (page: string) => { setActivePage(page); setQuery(""); setSelectedServer(null); };
   const refresh = () => {
     setSyncOpen(true); setSyncStep(0);
@@ -145,16 +163,38 @@ export function StratusApp() {
     if (file.size > 10 * 1024 * 1024) return setUploadMessage("This file exceeds the 10 MB upload limit.");
     setUploadMessage(`${file.name} passed file validation. Server parsing requires the database deployment.`);
   };
-  const askAssistant = (question: string) => {
+  const localAssistantAnswer = (question: string) => {
     const q = question.toLowerCase();
-    if (q.includes("highest") && q.includes("cost")) setAssistantAnswer(`Nilkamal has the highest July 2026 bill at ${usd.format(clients.Nilkamal.bills.at(-1)!.total)}.`);
-    else if (q.includes("public ip")) setAssistantAnswer(allServers.filter((s) => s.publicIp).map((s) => `${s.client}: ${s.name} — ${s.publicIp}`).join("\n") || "No public IPs were returned.");
-    else if (q.includes("gcpl") && q.includes("ec2")) setAssistantAnswer(`GCPL EC2 spend from February through July: ${clients.GCPL.bills.map((b) => `${b.month} ${usd.format(b.topServiceCost)}`).join(", ")}.`);
-    else if (q.includes("stopped")) setAssistantAnswer(inventoryState.state === "ready" ? allServers.filter((server) => server.liveState === "stopped").map((server) => `${server.client}: ${server.name} (${server.instanceId})`).join("\n") || "No stopped EC2 instances were returned." : "The live inventory is unavailable, so Stratus will not guess.");
-    else if (q.includes("failed") && q.includes("backup")) setAssistantAnswer(inventoryState.state === "ready" ? inventoryState.profiles.flatMap((profile) => profile.backupJobs.filter((job) => job.state === "FAILED").map((job) => `${profile.client}: ${job.resourceType} — ${job.statusMessage ?? job.id}`)).join("\n") || "No failed AWS Backup jobs were returned." : "AWS Backup inventory is unavailable.");
-    else if (q.includes("vpn") || q.includes("unused")) setAssistantAnswer("That question needs additional AWS service discovery that is not collected yet. Stratus will not guess.");
-    else setAssistantAnswer("The external AI provider is not configured. I can still answer supported questions from the loaded billing history and documented inventory.");
+    if ((q.includes("why") || q.includes("increase") || q.includes("decrease")) && q.includes("bill")) {
+      const namedClient = clientOrder.find((name) => q.includes(name.toLowerCase())) ?? selectedClient;
+      const history = clients[namedClient].bills, latest = history.at(-1)!, previous = history.at(-2)!;
+      const change = latest.total - previous.total, percent = previous.total ? change / previous.total * 100 : 0;
+      return `${namedClient}'s ${latest.month} bill ${change >= 0 ? "increased" : "decreased"} by ${usd.format(Math.abs(change))} (${Math.abs(percent).toFixed(1)}%) from ${usd.format(previous.total)} in ${previous.month} to ${usd.format(latest.total)}. Its top recorded service was ${latest.topService} at ${usd.format(latest.topServiceCost)}. The supplied bill summary does not include enough service-level line items to attribute the entire change more precisely.`;
+    }
+    if (q.includes("highest") && q.includes("cost")) return `Nilkamal has the highest July 2026 bill at ${usd.format(clients.Nilkamal.bills.at(-1)!.total)}.`;
+    if (q.includes("public ip")) return allServers.filter((s) => s.publicIp).map((s) => `${s.client}: ${s.name} — ${s.publicIp}`).join("\n") || "No public IPs were returned.";
+    if (q.includes("gcpl") && q.includes("ec2")) return `GCPL EC2 spend from February through July: ${clients.GCPL.bills.map((b) => `${b.month} ${usd.format(b.topServiceCost)}`).join(", ")}.`;
+    if (q.includes("stopped")) return inventoryState.state === "ready" ? allServers.filter((server) => server.liveState === "stopped").map((server) => `${server.client}: ${server.name} (${server.instanceId})`).join("\n") || "No stopped EC2 instances were returned." : "The live inventory is unavailable, so Stratus will not guess.";
+    if (q.includes("failed") && q.includes("backup")) return inventoryState.state === "ready" ? inventoryState.profiles.flatMap((profile) => profile.backupJobs.filter((job) => job.state === "FAILED").map((job) => `${profile.client}: ${job.resourceType} — ${job.statusMessage ?? job.id}`)).join("\n") || "No failed AWS Backup jobs were returned." : "AWS Backup inventory is unavailable.";
+    if (q.includes("admin") && (q.includes("iam") || q.includes("user"))) return inventoryState.state === "ready" ? inventoryState.profiles.flatMap((profile) => (profile.iamUsers ?? []).filter((user) => user.administratorAccess).map((user) => `${profile.client}: ${user.userName} — ${user.administratorEvidence.join("; ")}`)).join("\n") || "No administrator-equivalent IAM user policies were confirmed." : "IAM inventory is unavailable.";
+    if (q.includes("vpn") || q.includes("unused")) return "That question needs additional AWS service discovery that is not collected yet. Stratus will not guess.";
+    return "OpenAI is unavailable for this request, and the question is outside the built-in source-backed checks.";
+  };
+  const askAssistant = async (question: string) => {
     setAssistantQuestion(question);
+    setAssistantAnswer("Analyzing the current source snapshot…");
+    setAssistantPending(true);
+    try {
+      const response = await fetch("/api/ai/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, selectedClient }) });
+      const data = await response.json() as { answer?: string; error?: string; model?: string };
+      if (!response.ok || !data.answer) throw new Error(data.error ?? "The assistant returned no answer.");
+      setAssistantAnswer(data.answer);
+      setAssistantConfig({ configured: true, model: data.model ?? assistantConfig?.model ?? "gpt-5.4-mini" });
+    } catch {
+      setAssistantAnswer(localAssistantAnswer(question));
+    } finally {
+      setAssistantPending(false);
+    }
   };
   const exportCsv = (kind: "billing" | "infrastructure") => {
     const csv = kind === "billing"
@@ -191,14 +231,14 @@ export function StratusApp() {
           {activePage === "Servers" && <ServersPage liveServers={selectedServers} inventoryState={inventoryState.state} regionFilter={regionFilter} setRegionFilter={setRegionFilter} selectedServer={selectedServer} setSelectedServer={setSelectedServer} />}
           {activePage === "Backups" && <BackupsPage clientName={selectedClient} inventory={selectedInventory} inventoryState={inventoryState.state} />}
           {activePage === "Network" && <NetworkPage clientName={selectedClient} servers={selectedServers} />}
-          {activePage === "IAM & Security" && <SecurityPage clientName={selectedClient} />}
+          {activePage === "IAM & Security" && <SecurityPage clientName={selectedClient} inventory={selectedInventory} inventoryState={inventoryState.state} />}
           {activePage === "Alerts" && <AlertsPage clientName={selectedClient} refresh={refresh} profileStatus={selectedProfile} />}
           {activePage === "Reports" && <ReportsPage exportCsv={exportCsv} />}
         </div>
       </main>
 
       <button className="ai-button" aria-label="Open Stratus AI assistant" onClick={() => setAssistantOpen((open) => !open)} aria-expanded={assistantOpen}><span><AppIcon name="sparkles" size={22} /></span><b>Ask AI</b></button>
-      {assistantOpen && <Assistant question={assistantQuestion} answer={assistantAnswer} ask={askAssistant} close={() => setAssistantOpen(false)} />}
+      {assistantOpen && <Assistant question={assistantQuestion} answer={assistantAnswer} ask={askAssistant} close={() => setAssistantOpen(false)} pending={assistantPending} config={assistantConfig} />}
       {uploadOpen && <Modal title="Upload AWS bill summary" close={() => { setUploadOpen(false); setUploadMessage(""); }}><button className="drop-zone" onClick={() => fileRef.current?.click()}><span><AppIcon name="upload" size={28} /></span><strong>Choose a PDF bill summary</strong><small>Maximum 10 MB · source files are discarded after parsing</small></button><input ref={fileRef} className="sr-only" type="file" accept="application/pdf,.pdf" onChange={(e) => handleUpload(e.target.files?.[0])} /><p className="modal-message" aria-live="polite">{uploadMessage || `The bill will be validated and assigned to ${selectedClient}.`}</p></Modal>}
       {syncOpen && <Modal title={`Refresh ${selectedClient}`} close={() => setSyncOpen(false)}><div className="sync-list">{serviceSteps.map((step, index) => <div key={step}><span className={syncStep >= serviceSteps.length ? "done" : index === 0 ? "running" : "pending"}>{syncStep >= serviceSteps.length ? "✓" : index === 0 ? "↻" : "·"}</span><strong>{step}</strong><small>{syncStep >= serviceSteps.length ? syncResult(step, selectedInventory) : index === 0 ? "Discovering live AWS resources…" : "Waiting"}</small></div>)}</div>{syncStep >= serviceSteps.length && (selectedInventory ? <p className="modal-message">Live read-only discovery completed for “{client.profile}”: {selectedInventory.instances.length} EC2 instances, {selectedInventory.buckets.length} S3 buckets, and {selectedInventory.backupJobs.length} AWS Backup jobs.</p> : <p className="sync-error">The local connector could not discover resources for AWS CLI profile “{client.profile}”. Stored source data was preserved.</p>)}</Modal>}
     </div>
@@ -260,13 +300,20 @@ function BackupsPage({ clientName, inventory, inventoryState }: { clientName: Cl
 
 function NetworkPage({ clientName, servers }: { clientName: ClientName; servers: DisplayServer[] }) { const client = clients[clientName], server = servers[0], vpcs = [...new Set(servers.map((item) => item.vpcId).filter((value): value is string => Boolean(value)))]; return <div className="page-stack"><section className="page-head"><div><p className="eyebrow">MUMBAI + HYDERABAD</p><h2>Network overview</h2><p>Live EC2 addressing, VPC, subnet, and security-group relationships from the read-only discovery pass.</p></div><span className="source-badge">Read-only AWS</span></section><article className="panel topology-panel"><PanelTitle title="Regional relationship" /><RegionRoute clientName={clientName} /><div className="topology-flow"><div><span><AppIcon name="network" /></span><b>Public address</b><small>{server?.publicIp ?? "No public IP returned"}</small></div><i>→</i><div><span><AppIcon name="map" /></span><b>VPC</b><small>{server?.vpcId ?? "Unavailable"}</small></div><i>→</i><div><span><AppIcon name="servers" /></span><b>{servers.length} workloads</b><small>{server?.privateIp ?? "No instance returned"}</small></div><i>→</i><div><span><AppIcon name="cloud" /></span><b>DR backups</b><small>{client.drRegion}</small></div></div></article><section className="detail-grid"><Detail title="Address inventory" rows={servers.length ? servers.flatMap((item) => [[`${item.name} private`, item.privateIp ?? "Unavailable"], [`${item.name} public`, item.publicIp ?? "No public IP"]]) : [["Addresses", "No EC2 instances returned"]]} /><Detail title="VPC inventory" rows={vpcs.length ? vpcs.map((vpc, index) => [`VPC ${index + 1}`, vpc]) : [["VPCs", "No VPC IDs returned"]]} /></section></div>; }
 
-function SecurityPage({ clientName }: { clientName: ClientName }) { const notes = clientName === "GCPL" ? [["MFA enforcement", "Documented as required for cloud and local admin paths"], ["Endpoint protection", "CrowdStrike Falcon Insight documented"], ["Patch management", "WSUS / AWS Systems Manager documented"]] : clientName === "Fusion" ? [["MFA status", "Assumed in source; not directly verified"], ["Security group", "Fusion_SG documented"], ["Administrative access", "RDP restricted to approved /32 sources"]] : clientName === "Swastiks" ? [["Endpoint protection", "CrowdStrike Falcon Insight documented"], ["OS hardening", "CIS Level 1 baseline documented"], ["Patch management", "WSUS / AWS Systems Manager documented"]] : []; return <div className="page-stack security-page"><section className="page-head"><div><p className="eyebrow">IAM VISIBILITY</p><h2>IAM & security</h2><p>Elevated access is never inferred. Live users, roles, keys, and policies require IAM read permissions.</p></div><span className="source-badge warning">IAM sync required</span></section><section className="summary-grid"><Kpi icon="shield" title="IAM users" value="Unavailable" note="Requires iam:ListUsers" tone="muted" /><Kpi icon="key" title="Active keys" value="Unavailable" note="Secret values are never collected" tone="muted" /><Kpi icon="check" title="MFA coverage" value={clientName === "GCPL" ? "Documented" : "Unverified"} note="Live verification pending" /><Kpi icon="alert" title="Admin findings" value="Unavailable" note="No privilege claims invented" tone="muted" /></section><article className="panel"><PanelTitle title="Documented controls" />{notes.length ? <div className="data-list">{notes.map(([title, text]) => <div key={title}><span>{title}<small>{text}</small></span><span className="source-badge">Source baseline</span></div>)}</div> : <Empty title="No security baseline supplied" text="IAM inventory will appear after the named AWS profile can be read." />}</article></div>; }
+function SecurityPage({ clientName, inventory, inventoryState }: { clientName: ClientName; inventory?: AwsProfileInventory; inventoryState: AwsInventoryState["state"] }) {
+  const users = inventory?.iamUsers ?? [];
+  const activeKeys = users.flatMap((user) => user.accessKeys).filter((key) => key.status === "Active").length;
+  const usersWithMfa = users.filter((user) => user.mfaDeviceCount > 0).length;
+  const administrators = users.filter((user) => user.administratorAccess);
+  const ready = inventoryState === "ready" && Boolean(inventory) && !inventory?.errors.some((error) => error.service === "IAM");
+  return <div className="page-stack security-page"><section className="page-head"><div><p className="eyebrow">IAM VISIBILITY</p><h2>IAM & security</h2><p>Live IAM users, group membership, policies, access-key status, and MFA coverage from the read-only connector.</p></div><span className={`source-badge ${ready ? "" : "warning"}`}>{ready ? "Live IAM inventory" : "IAM sync unavailable"}</span></section><section className="summary-grid"><Kpi icon="shield" title="IAM users" value={ready ? users.length.toLocaleString() : "Unavailable"} note={ready ? `${clientName} account` : "Requires IAM read permissions"} tone={ready ? "default" : "muted"} /><Kpi icon="key" title="Active keys" value={ready ? activeKeys.toLocaleString() : "Unavailable"} note="Secret values are never collected" tone={ready ? "default" : "muted"} /><Kpi icon="check" title="MFA coverage" value={ready && users.length ? `${Math.round(usersWithMfa / users.length * 100)}%` : ready ? "0%" : "Unverified"} note={ready ? `${usersWithMfa}/${users.length} users with MFA` : "Live verification pending"} /><Kpi icon="alert" title="Admin findings" value={ready ? administrators.length.toLocaleString() : "Unavailable"} note={ready ? "Confirmed policy evidence only" : "No privilege claims invented"} tone={ready && administrators.length ? "warning" : ready ? "default" : "muted"} /></section><article className="panel"><PanelTitle title="IAM user findings" />{ready && users.length ? <div className="data-list">{users.map((user) => <div key={user.arn}><span>{user.userName}<small>{user.administratorAccess ? user.administratorEvidence.join(" · ") : `${user.attachedPolicies.length + user.inlinePolicies.length + user.groupPolicies.length} policies · ${user.groups.length} groups · ${user.accessKeys.filter((key) => key.status === "Active").length} active keys`}</small></span><span className={`source-badge ${user.administratorAccess ? "warning" : ""}`}>{user.administratorAccess ? "Administrator" : user.mfaDeviceCount ? "MFA enabled" : "No MFA device"}</span></div>)}</div> : <Empty title={inventoryState === "loading" ? "Inspecting IAM" : "No IAM users returned"} text="Stratus evaluates direct, inline, and group-derived administrator policies without collecting secret access-key values." />}</article></div>;
+}
 
 function AlertsPage({ clientName, refresh, profileStatus }: { clientName: ClientName; refresh: () => void; profileStatus?: AwsProfileStatus }) { return <div className="page-stack"><section className="page-head"><div><p className="eyebrow">ACTIONABLE SIGNALS</p><h2>Alerts</h2><p>Only conditions supported by stored data are shown. No noisy or fabricated operational alerts.</p></div><button className="refresh-button" onClick={refresh}>↻ Retry sync</button></section><article className="panel alerts-page"><PanelTitle title="Open alerts" /><AlertRows clientName={clientName} profileStatus={profileStatus} /></article></div>; }
 
 function ReportsPage({ exportCsv }: { exportCsv: (kind: "billing" | "infrastructure") => void }) { return <div className="page-stack"><section className="page-head"><div><p className="eyebrow">EXPORTS</p><h2>Reports</h2><p>Exports use the same validated billing and live AWS inventory shown throughout Stratus.</p></div></section><section className="report-grid"><button onClick={() => exportCsv("billing")}><span><AppIcon name="billing" /></span><div><strong>Billing summary CSV</strong><small>All clients · six months · exact source totals</small></div><b><AppIcon name="download" size={14} /> Download</b></button><button onClick={() => exportCsv("infrastructure")}><span><AppIcon name="servers" /></span><div><strong>Infrastructure summary CSV</strong><small>Live EC2 state, instance IDs, regions, addresses, and EBS storage</small></div><b><AppIcon name="download" size={14} /> Download</b></button><button onClick={() => window.print()}><span><AppIcon name="printer" /></span><div><strong>Printable current view</strong><small>Browser-optimized operations report</small></div><b><AppIcon name="printer" size={14} /> Print</b></button></section></div>; }
 
-function Assistant({ question, answer, ask, close }: { question: string; answer: string; ask: (question: string) => void; close: () => void }) { const [draft, setDraft] = useState(""); const suggestions = ["Why did Nilkamal's bill increase?", "Which servers are stopped?", "Show failed backups.", "Which IAM users have admin access?"]; return <aside className="assistant-panel" aria-label="Stratus AI assistant"><header><span><AppIcon name="sparkles" size={18} /></span><div><strong>Stratus AI</strong><small>Read-only · source aware</small></div><button onClick={close} aria-label="Close assistant"><AppIcon name="close" size={19} /></button></header><div className="assistant-scroll"><p className="assistant-config"><AppIcon name="info" size={14} /> External AI is not configured. Supported source-backed questions still work.</p><div className="suggestions">{suggestions.map((s) => <button className="suggestion" key={s} onClick={() => ask(s)}><AppIcon name="sparkles" size={13} />{s}</button>)}</div>{question && <div className="chat"><p><b>You</b>{question}</p><p><b>Stratus</b>{answer.split("\n").map((line) => <span key={line}>{line}</span>)}</p></div>}</div><form onSubmit={(e) => { e.preventDefault(); if (draft.trim()) { ask(draft); setDraft(""); } }}><label className="sr-only" htmlFor="ai-question">Ask Stratus AI</label><input id="ai-question" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ask about billing or inventory…" /><button aria-label="Send question"><AppIcon name="arrow" size={17} /></button></form></aside>; }
+function Assistant({ question, answer, ask, close, pending, config }: { question: string; answer: string; ask: (question: string) => Promise<void>; close: () => void; pending: boolean; config: { configured: boolean; model: string } | null }) { const [draft, setDraft] = useState(""); const suggestions = ["Why did Nilkamal's bill increase?", "Which servers are stopped?", "Show failed backups.", "Which IAM users have admin access?"]; return <aside className="assistant-panel" aria-label="Stratus AI assistant"><header><span><AppIcon name="sparkles" size={18} /></span><div><strong>Stratus AI</strong><small>Read-only · source aware</small></div><button onClick={close} aria-label="Close assistant"><AppIcon name="close" size={19} /></button></header><div className="assistant-scroll"><p className="assistant-config"><AppIcon name="info" size={14} />{config === null ? "Checking OpenAI configuration…" : config.configured ? `OpenAI ${config.model} · server-side key · live sources` : "OpenAI key not configured · built-in source checks remain active"}</p><div className="suggestions">{suggestions.map((s) => <button className="suggestion" key={s} onClick={() => void ask(s)} disabled={pending}><AppIcon name="sparkles" size={13} />{s}</button>)}</div>{question && <div className="chat" aria-live="polite" aria-busy={pending}><p><b>You</b>{question}</p><p><b>Stratus</b>{answer.split("\n").map((line, index) => <span key={`${index}-${line}`}>{line}</span>)}</p></div>}</div><form onSubmit={(e) => { e.preventDefault(); if (draft.trim() && !pending) { void ask(draft); setDraft(""); } }}><label className="sr-only" htmlFor="ai-question">Ask Stratus AI</label><input id="ai-question" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ask about billing or inventory…" disabled={pending} /><button aria-label="Send question" disabled={pending}><AppIcon name="arrow" size={17} /></button></form></aside>; }
 
 function Modal({ title, children, close }: { title: string; children: React.ReactNode; close: () => void }) { return <div className="modal-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && close()}><section className="modal" role="dialog" aria-modal="true" aria-label={title}><header><h2>{title}</h2><button onClick={close} aria-label="Close dialog"><AppIcon name="close" size={18} /></button></header>{children}</section></div>; }
 function Kpi({ icon, title, value, note, tone = "default" }: { icon: IconName; title: string; value: string; note: string; tone?: string }) { return <article className={`kpi kpi-${tone}`}><div className={`kpi-icon ${tone}`}><AppIcon name={icon} size={18} /></div><div><p>{title}</p><strong>{value}</strong><span className={tone}>{note}</span></div></article>; }
