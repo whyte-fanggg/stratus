@@ -1,5 +1,5 @@
-import { PortfolioOS } from "./portfolio-os";
+import { StratusApp } from "./stratus";
 
 export default function Home() {
-  return <PortfolioOS />;
+  return <StratusApp />;
 }
