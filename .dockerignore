@@ -1,0 +1,12 @@
+.git
+.next
+.vinext
+.wrangler
+dist
+node_modules
+.env*
+.stratus-input
+qa
+work
+outputs
+npm-debug.log*

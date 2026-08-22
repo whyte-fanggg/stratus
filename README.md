@@ -11,9 +11,9 @@ The application recognizes exactly four clients: Nilkamal, GCPL, Swastiks, and F
 - Cloudflare Worker server runtime
 - Cloudflare D1 with Drizzle schema and checked-in migrations
 - Platform access controls for the private deployed Site
-- A provider boundary for read-only AWS collection and optional AI analysis
+- A Dockerized, server-side AWS profile connector and optional AI analysis boundary
 
-The original request described Express, PostgreSQL, Prisma, and a three-service Docker deployment. This checkout is an existing OpenAI Sites project, whose production runtime is a Cloudflare Worker with D1. The implementation preserves the requested relational model, read-only boundaries, and durable storage semantics while using the existing platform architecture.
+The private hosted frontend remains an OpenAI Sites project running as a Cloudflare Worker with D1. For machines that hold the named AWS profiles, Docker Compose adds a separate Express connector and mounts the host `.aws` directory read-only. Credentials never enter the image, browser bundle, API response, database, or source control.
 
 ## Source material loaded
 
@@ -31,6 +31,7 @@ Prerequisites:
 - Node.js 22.13 or newer
 - AWS CLI v2 for live read-only discovery
 - Named AWS profiles on the host machine
+- Docker Desktop or Docker Engine with Compose
 
 ```powershell
 Copy-Item .env.example .env.local
@@ -42,6 +43,23 @@ Local URL: `http://localhost:3000`
 
 The first page can be used without AWS credentials. Source-backed billing and infrastructure data remain available, and every unavailable live value is shown explicitly.
 
+### Docker startup with local AWS profiles
+
+Set `AWS_CONFIG_DIR` to the absolute host directory containing AWS `config`, `credentials`, and any SSO cache, then start the stack. Do not copy this directory into the repository.
+
+```powershell
+$env:AWS_CONFIG_DIR = "$env:USERPROFILE/.aws"
+docker compose up --build
+```
+
+On Linux:
+
+```bash
+AWS_CONFIG_DIR="$HOME/.aws" docker compose up --build
+```
+
+The browser calls the same-origin `/api/aws/status` route. That route proxies to `stratus-api`, which uses the AWS SDK credential provider on the server. The connector returns only client/profile health, expected and observed account IDs, timestamps, and safe error codes.
+
 ## Environment variables
 
 ```text
@@ -49,6 +67,7 @@ NEXT_PUBLIC_SITE_URL=http://localhost:3000
 AI_PROVIDER=
 AI_API_KEY=
 AI_MODEL=
+AWS_CONFIG_DIR=/home/your-user/.aws
 AWS_PROFILE_NILKAMAL=nilkamal
 AWS_PROFILE_GCPL=gcpl
 AWS_PROFILE_SWASTIKS=swastiks
@@ -94,7 +113,7 @@ The bundled parser expects the standard AWS bill-summary terminology used in the
 - Operational history retention: approximately 30 days
 - Billing history: at least six months and never deleted by a new upload
 
-The UI displays progress per service and preserves previously stored data when a profile is absent, credentials expire, access is denied, throttling occurs, or a partial synchronization fails.
+The UI verifies the selected named profile through the local connector and preserves previously stored data when a profile is absent, credentials expire, access is denied, throttling occurs, or a check fails. Resource-level discovery remains a separate read-only synchronization pass.
 
 ## Database
 
@@ -143,6 +162,8 @@ Development data, migrations, and application code travel with the repository. S
 4. Install dependencies and run the quality commands.
 5. Deploy through OpenAI Sites, which provisions the Worker and D1 bindings.
 
-## Operational limitations in this checkout
+## Operational status and limitations
 
-No AWS named profiles were visible in the current execution environment on August 22, 2026. Live EC2, Backup, VPC, IAM, S3, CloudWatch, and Cost Explorer reads therefore remain in the explicit configuration-required state. The application does not fabricate those values. Nilkamal also lacks a supplied infrastructure baseline, so only its validated billing history is initially available.
+All four required named profiles were verified with AWS STS on August 22, 2026, and each returned the expected client account. Docker Desktop 4.87.0, Engine 29.7.2, and Compose 5.4.0 were also verified. The Dockerized connector now exposes that validation safely to Stratus.
+
+Profile validation is not the same as a completed resource-inventory sync. Live EC2, Backup, VPC, IAM, S3, CloudWatch, and Cost Explorer records remain unavailable until their read-only discovery collectors are run and persisted. The hosted Sites runtime cannot read a workstation's local `.aws` directory; use the Docker stack on the profile-owning machine, or provide an approved private connector for hosted synchronization. Nilkamal also lacks a supplied infrastructure baseline, so its initial stored view contains billing history only.

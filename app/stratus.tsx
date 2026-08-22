@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { clientOrder, clients, type ClientName, type Server, usd } from "./stratus-data";
 
 const nav = [
@@ -16,6 +16,39 @@ const backupPolicies: Partial<Record<ClientName, Array<[string, string, string, 
 
 const serviceSteps = ["EC2", "EBS", "Networking", "IAM", "S3", "Backups", "CloudWatch"];
 
+type AwsProfileStatus = {
+  client: ClientName;
+  profile: string;
+  expectedAccountId: string;
+  connected: boolean;
+  accountId: string | null;
+  accountMatches: boolean;
+  checkedAt: string;
+  errorCode: string | null;
+};
+
+type AwsConnectorStatus = {
+  state: "checking" | "connected" | "degraded" | "unavailable";
+  connected: number;
+  expected: number;
+  allConnected: boolean;
+  profiles: AwsProfileStatus[];
+  reason?: string;
+};
+
+async function readAwsConnectorStatus(force = false): Promise<AwsConnectorStatus> {
+  try {
+    const response = await fetch(`/api/aws/status${force ? "?refresh=1" : ""}`, { cache: "no-store" });
+    const data = await response.json() as Partial<AwsConnectorStatus>;
+    const profiles = Array.isArray(data.profiles) ? data.profiles : [];
+    if (!profiles.length) return { state: "unavailable", connected: 0, expected: 4, allConnected: false, profiles, reason: data.reason };
+    const connected = profiles.filter((profile) => profile.connected).length;
+    return { state: connected === profiles.length ? "connected" : "degraded", connected, expected: profiles.length, allConnected: connected === profiles.length, profiles };
+  } catch {
+    return { state: "unavailable", connected: 0, expected: 4, allConnected: false, profiles: [], reason: "The local AWS connector could not be reached." };
+  }
+}
+
 export function StratusApp() {
   const [selectedClient, setSelectedClient] = useState<ClientName>("Nilkamal");
   const [activePage, setActivePage] = useState("Dashboard");
@@ -28,6 +61,7 @@ export function StratusApp() {
   const [uploadMessage, setUploadMessage] = useState("");
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncStep, setSyncStep] = useState(-1);
+  const [awsStatus, setAwsStatus] = useState<AwsConnectorStatus>({ state: "checking", connected: 0, expected: 4, allConnected: false, profiles: [] });
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const client = clients[selectedClient];
@@ -35,10 +69,18 @@ export function StratusApp() {
   const documentedServers = clientOrder.reduce((sum, name) => sum + clients[name].servers.length, 0);
   const allServers = clientOrder.flatMap((name) => clients[name].servers.map((server) => ({ ...server, client: name })));
   const searchResults = query.trim().length > 1 ? allServers.filter((server) => Object.values(server).join(" ").toLowerCase().includes(query.toLowerCase())) : [];
+  const selectedProfile = awsStatus.profiles.find((profile) => profile.client === selectedClient);
+
+  useEffect(() => {
+    let active = true;
+    void readAwsConnectorStatus().then((status) => { if (active) setAwsStatus(status); });
+    return () => { active = false; };
+  }, []);
 
   const navigate = (page: string) => { setActivePage(page); setQuery(""); setSelectedServer(null); };
   const refresh = () => {
     setSyncOpen(true); setSyncStep(0);
+    void readAwsConnectorStatus(true).then(setAwsStatus);
     serviceSteps.forEach((_, index) => window.setTimeout(() => setSyncStep(index + 1), 360 * (index + 1)));
   };
   const handleUpload = (file?: File) => {
@@ -52,7 +94,7 @@ export function StratusApp() {
     if (q.includes("highest") && q.includes("cost")) setAssistantAnswer(`Nilkamal has the highest July 2026 bill at ${usd.format(clients.Nilkamal.bills.at(-1)!.total)}.`);
     else if (q.includes("public ip")) setAssistantAnswer(allServers.filter((s) => s.publicIp).map((s) => `${s.client}: ${s.name} — ${s.publicIp}`).join("\n") || "No documented public IPs are available.");
     else if (q.includes("gcpl") && q.includes("ec2")) setAssistantAnswer(`GCPL EC2 spend from February through July: ${clients.GCPL.bills.map((b) => `${b.month} ${usd.format(b.topServiceCost)}`).join(", ")}.`);
-    else if (q.includes("stopped") || q.includes("vpn") || q.includes("unused")) setAssistantAnswer("That answer needs live AWS state. The configured profiles were not detected, so Stratus will not guess.");
+    else if (q.includes("stopped") || q.includes("vpn") || q.includes("unused")) setAssistantAnswer(awsStatus.allConnected ? "The AWS profiles are connected, but this answer requires a completed resource-inventory sync. Stratus will not guess." : "That answer needs live AWS state. The local AWS connector is unavailable, so Stratus will not guess.");
     else setAssistantAnswer("The external AI provider is not configured. I can still answer supported questions from the loaded billing history and documented inventory.");
     setAssistantQuestion(question);
   };
@@ -69,7 +111,7 @@ export function StratusApp() {
       <aside className="sidebar">
         <button className="brand" onClick={() => navigate("Dashboard")}><span className="brand-cloud">☁</span><span><strong>Stratus</strong><small>AWS operations</small></span></button>
         <nav aria-label="Primary navigation">{nav.map(([item, icon]) => <button onClick={() => navigate(item)} className={activePage === item ? "active" : ""} key={item}><span aria-hidden>{icon}</span>{item}</button>)}</nav>
-        <div className="sidebar-foot"><span className="status-dot" />Source data ready<small>AWS profiles not detected</small></div>
+        <div className="sidebar-foot"><span className="status-dot" />Source data ready<small>{awsStatus.state === "checking" ? "Checking AWS connector…" : awsStatus.state === "connected" ? `${awsStatus.connected}/${awsStatus.expected} AWS profiles verified` : awsStatus.state === "degraded" ? `${awsStatus.connected}/${awsStatus.expected} AWS profiles available` : "Local AWS connector unavailable"}</small></div>
       </aside>
 
       <main>
@@ -84,13 +126,13 @@ export function StratusApp() {
         <section className="client-strip" aria-label="Clients"><span>Clients</span>{clientOrder.map((name) => <button key={name} onClick={() => setSelectedClient(name)} className={name === selectedClient ? "selected" : ""}><i style={{ background: clients[name].accent }}>{clients[name].initials}</i>{name}</button>)}</section>
 
         <div className="content">
-          {activePage === "Dashboard" && <Dashboard clientName={selectedClient} navigate={navigate} globalSpend={globalSpend} documentedServers={documentedServers} refresh={refresh} />}
+          {activePage === "Dashboard" && <Dashboard clientName={selectedClient} navigate={navigate} globalSpend={globalSpend} documentedServers={documentedServers} refresh={refresh} profileStatus={selectedProfile} />}
           {activePage === "Billing" && <BillingPage clientName={selectedClient} onUpload={() => setUploadOpen(true)} />}
           {activePage === "Servers" && <ServersPage clientName={selectedClient} regionFilter={regionFilter} setRegionFilter={setRegionFilter} selectedServer={selectedServer} setSelectedServer={setSelectedServer} />}
           {activePage === "Backups" && <BackupsPage clientName={selectedClient} />}
           {activePage === "Network" && <NetworkPage clientName={selectedClient} />}
           {activePage === "IAM & Security" && <SecurityPage clientName={selectedClient} />}
-          {activePage === "Alerts" && <AlertsPage clientName={selectedClient} refresh={refresh} />}
+          {activePage === "Alerts" && <AlertsPage clientName={selectedClient} refresh={refresh} profileStatus={selectedProfile} />}
           {activePage === "Reports" && <ReportsPage exportCsv={exportCsv} />}
         </div>
       </main>
@@ -98,16 +140,16 @@ export function StratusApp() {
       <button className="ai-button" aria-label="Open Stratus AI assistant" onClick={() => setAssistantOpen((open) => !open)}><span>✦</span><b>Ask AI</b></button>
       {assistantOpen && <Assistant question={assistantQuestion} answer={assistantAnswer} ask={askAssistant} close={() => setAssistantOpen(false)} />}
       {uploadOpen && <Modal title="Upload AWS bill summary" close={() => { setUploadOpen(false); setUploadMessage(""); }}><button className="drop-zone" onClick={() => fileRef.current?.click()}><span>☁</span><strong>Choose a PDF bill summary</strong><small>Maximum 10 MB · source files are discarded after parsing</small></button><input ref={fileRef} className="sr-only" type="file" accept="application/pdf,.pdf" onChange={(e) => handleUpload(e.target.files?.[0])} /><p className="modal-message" aria-live="polite">{uploadMessage || `The bill will be validated and assigned to ${selectedClient}.`}</p></Modal>}
-      {syncOpen && <Modal title={`Refresh ${selectedClient}`} close={() => setSyncOpen(false)}><div className="sync-list">{serviceSteps.map((step, index) => <div key={step}><span className={syncStep > index ? "done" : syncStep === index ? "running" : "pending"}>{syncStep > index ? "✓" : syncStep === index ? "↻" : "·"}</span><strong>{step}</strong><small>{syncStep > index ? "Profile unavailable" : syncStep === index ? "Checking…" : "Waiting"}</small></div>)}</div>{syncStep >= serviceSteps.length && <p className="sync-error">Sync finished with configuration errors: AWS CLI profile “{client.profile}” was not detected. Stored source data was preserved.</p>}</Modal>}
+      {syncOpen && <Modal title={`Refresh ${selectedClient}`} close={() => setSyncOpen(false)}><div className="sync-list">{serviceSteps.map((step, index) => <div key={step}><span className={syncStep > index ? "done" : syncStep === index ? "running" : "pending"}>{syncStep > index ? "✓" : syncStep === index ? "↻" : "·"}</span><strong>{step}</strong><small>{syncStep > index ? selectedProfile?.connected ? "Profile verified" : "Connector unavailable" : syncStep === index ? "Checking…" : "Waiting"}</small></div>)}</div>{syncStep >= serviceSteps.length && (selectedProfile?.connected ? <p className="modal-message">AWS profile “{client.profile}” is connected to account {selectedProfile.accountId}. Resource inventory remains source-backed until the service discovery pass completes.</p> : <p className="sync-error">The local connector could not verify AWS CLI profile “{client.profile}”. Stored source data was preserved.</p>)}</Modal>}
     </div>
   );
 }
 
-function Dashboard({ clientName, navigate, globalSpend, documentedServers, refresh }: { clientName: ClientName; navigate: (page: string) => void; globalSpend: number; documentedServers: number; refresh: () => void }) {
+function Dashboard({ clientName, navigate, globalSpend, documentedServers, refresh, profileStatus }: { clientName: ClientName; navigate: (page: string) => void; globalSpend: number; documentedServers: number; refresh: () => void; profileStatus?: AwsProfileStatus }) {
   const client = clients[clientName], latest = client.bills.at(-1)!, prior = client.bills.at(-2)!;
   const change = ((latest.total - prior.total) / prior.total) * 100, maxBill = Math.max(...client.bills.map((bill) => bill.total));
   return <>
-    <section className="notice"><span>i</span><div><strong>Source-backed baseline</strong><p>{client.sourceNote} Live fields remain unavailable until a valid <code>{client.profile}</code> profile is synchronized.</p></div><button onClick={refresh}>View sync status</button></section>
+    <section className="notice"><span>i</span><div><strong>{profileStatus?.connected ? "AWS profile connected" : "Source-backed baseline"}</strong><p>{profileStatus?.connected ? `${client.profile} was verified against account ${profileStatus.accountId}. ` : ""}{client.sourceNote} {!profileStatus?.connected && <>Live fields require the local <code>{client.profile}</code> connector.</>}</p></div><button onClick={refresh}>View sync status</button></section>
     <section className="kpis" aria-label="Key metrics">
       <Kpi icon="$" title="Selected client spend" value={usd.format(latest.total)} note={`${formatPercent(change, true)} vs Jun`} tone={change > 0.05 ? "warning" : "success"} />
       <Kpi icon="▥" title="Documented servers" value={String(client.servers.length)} note={`${documentedServers} across all clients`} />
@@ -119,7 +161,7 @@ function Dashboard({ clientName, navigate, globalSpend, documentedServers, refre
       <article className="panel spend-panel"><PanelTitle title="Monthly spend" action="Billing details" onAction={() => navigate("Billing")} /><div className="spend-summary"><div><strong>{usd.format(latest.total)}</strong><span>July 2026 grand total</span></div><p className={change > 0 ? "up" : "down"}>{change >= 0 ? "↑" : "↓"} {Math.abs(change).toFixed(1)}%</p></div><div className="bar-chart" aria-label="Six-month billing totals">{client.bills.map((bill) => <div className="bar-column" key={bill.month}><span>{usd.format(bill.total)}</span><i style={{ height: `${Math.max(10, (bill.total / maxBill) * 100)}%` }} /><b>{bill.month}</b></div>)}</div><div className="panel-foot"><span>6-month average <strong>{usd.format(average(client.bills.map((b) => b.total)))}</strong></span><span>Top service <strong>{latest.topService}</strong></span></div></article>
       <article className="panel servers-panel"><PanelTitle title={`Servers (${client.servers.length})`} action="View inventory" onAction={() => navigate("Servers")} />{client.servers.length ? <ServerTable servers={client.servers} onSelect={() => navigate("Servers")} /> : <Empty title="No infrastructure source supplied" text="Billing is available. Server inventory will populate after AWS profile synchronization." />}</article>
       <article className="panel network-panel"><PanelTitle title="Regional topology" action="Network" onAction={() => navigate("Network")} /><RegionRoute clientName={clientName} /><p className="panel-note">Architecture context comes from the supplied infrastructure baseline. Tunnel state and live telemetry need AWS synchronization.</p></article>
-      <article className="panel alerts-panel"><PanelTitle title="Attention needed" action="All alerts" onAction={() => navigate("Alerts")} /><AlertRows clientName={clientName} /></article>
+      <article className="panel alerts-panel"><PanelTitle title="Attention needed" action="All alerts" onAction={() => navigate("Alerts")} /><AlertRows clientName={clientName} profileStatus={profileStatus} /></article>
     </section>
   </>;
 }
@@ -142,7 +184,7 @@ function NetworkPage({ clientName }: { clientName: ClientName }) { const client 
 
 function SecurityPage({ clientName }: { clientName: ClientName }) { const notes = clientName === "GCPL" ? [["MFA enforcement", "Documented as required for cloud and local admin paths"], ["Endpoint protection", "CrowdStrike Falcon Insight documented"], ["Patch management", "WSUS / AWS Systems Manager documented"]] : clientName === "Fusion" ? [["MFA status", "Assumed in source; not directly verified"], ["Security group", "Fusion_SG documented"], ["Administrative access", "RDP restricted to approved /32 sources"]] : clientName === "Swastiks" ? [["Endpoint protection", "CrowdStrike Falcon Insight documented"], ["OS hardening", "CIS Level 1 baseline documented"], ["Patch management", "WSUS / AWS Systems Manager documented"]] : []; return <div className="page-stack"><section className="page-head"><div><p className="eyebrow">IAM VISIBILITY</p><h2>IAM & security</h2><p>Elevated access is never inferred. Live users, roles, keys, and policies require IAM read permissions.</p></div><span className="source-badge warning">IAM sync required</span></section><section className="summary-grid"><Kpi icon="◇" title="IAM users" value="Unavailable" note="Requires iam:ListUsers" tone="muted" /><Kpi icon="⚿" title="Active keys" value="Unavailable" note="Secret values are never collected" tone="muted" /><Kpi icon="✓" title="MFA coverage" value={clientName === "GCPL" ? "Documented" : "Unverified"} note="Live verification pending" /><Kpi icon="!" title="Admin findings" value="Unavailable" note="No privilege claims invented" tone="muted" /></section><article className="panel"><PanelTitle title="Documented controls" />{notes.length ? <div className="data-list">{notes.map(([title, text]) => <div key={title}><span>{title}<small>{text}</small></span><span className="source-badge">Source baseline</span></div>)}</div> : <Empty title="No security baseline supplied" text="IAM inventory will appear after the named AWS profile can be read." />}</article></div>; }
 
-function AlertsPage({ clientName, refresh }: { clientName: ClientName; refresh: () => void }) { return <div className="page-stack"><section className="page-head"><div><p className="eyebrow">ACTIONABLE SIGNALS</p><h2>Alerts</h2><p>Only conditions supported by stored data are shown. No noisy or fabricated operational alerts.</p></div><button className="refresh-button" onClick={refresh}>↻ Retry sync</button></section><article className="panel alerts-page"><PanelTitle title="Open alerts" /><AlertRows clientName={clientName} /></article></div>; }
+function AlertsPage({ clientName, refresh, profileStatus }: { clientName: ClientName; refresh: () => void; profileStatus?: AwsProfileStatus }) { return <div className="page-stack"><section className="page-head"><div><p className="eyebrow">ACTIONABLE SIGNALS</p><h2>Alerts</h2><p>Only conditions supported by stored data are shown. No noisy or fabricated operational alerts.</p></div><button className="refresh-button" onClick={refresh}>↻ Retry sync</button></section><article className="panel alerts-page"><PanelTitle title="Open alerts" /><AlertRows clientName={clientName} profileStatus={profileStatus} /></article></div>; }
 
 function ReportsPage({ exportCsv }: { exportCsv: (kind: "billing" | "infrastructure") => void }) { return <div className="page-stack"><section className="page-head"><div><p className="eyebrow">EXPORTS</p><h2>Reports</h2><p>Exports use the same validated application data shown throughout Stratus.</p></div></section><section className="report-grid"><button onClick={() => exportCsv("billing")}><span>▤</span><div><strong>Billing summary CSV</strong><small>All clients · six months · exact source totals</small></div><b>Download →</b></button><button onClick={() => exportCsv("infrastructure")}><span>▥</span><div><strong>Infrastructure summary CSV</strong><small>Documented servers, regions, and addresses</small></div><b>Download →</b></button><button onClick={() => window.print()}><span>▧</span><div><strong>Printable current view</strong><small>Browser-optimized operations report</small></div><b>Print →</b></button></section></div>; }
 
@@ -155,7 +197,7 @@ function Empty({ title, text }: { title: string; text: string }) { return <div c
 function RegionRoute({ clientName }: { clientName: ClientName }) { const client = clients[clientName]; return <div className="route"><div><i className="region-dot primary" /><strong>{client.primaryRegion}</strong><span>Primary · {client.primaryRegion === "Mumbai" ? "ap-south-1" : "ap-south-2"}</span></div><b>→</b><div><i className="region-dot" /><strong>{client.drRegion}</strong><span>DR · {client.drRegion === "Mumbai" ? "ap-south-1" : "ap-south-2"}</span></div></div>; }
 function ServerTable({ servers, onSelect, detailed = false }: { servers: Server[]; onSelect: (server: Server) => void; detailed?: boolean }) { return <div className="table-wrap"><table><thead><tr><th>Resource</th><th>Role</th><th>Environment</th><th>Status</th><th>Compute</th><th>Storage</th><th>Region</th>{detailed && <th>IP</th>}</tr></thead><tbody>{servers.map((server) => <tr key={server.name} onClick={() => onSelect(server)} tabIndex={0} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect(server)}><td><strong>{server.name}</strong><small>{server.os}</small></td><td>{server.role}</td><td>{server.environment}</td><td><span className="documented"><i />Documented</span></td><td>{server.cpu}<small>{server.memory}</small></td><td>{server.storage}</td><td>{server.region}<small>{server.zone}</small></td>{detailed && <td>{server.privateIp ?? "Unavailable"}<small>{server.publicIp ?? "No public IP documented"}</small></td>}</tr>)}</tbody></table></div>; }
 function Detail({ title, rows }: { title: string; rows: string[][] }) { return <article className="panel detail-card"><PanelTitle title={title} /><dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></article>; }
-function AlertRows({ clientName }: { clientName: ClientName }) { return <><div className="alert-row warning"><span>!</span><div><strong>Live synchronization unavailable</strong><p>AWS CLI profile “{clients[clientName].profile}” was not detected. Stored data remains available.</p></div><time>Now</time></div>{clientName === "Nilkamal" && <div className="alert-row"><span>i</span><div><strong>Infrastructure document missing</strong><p>Only historical bills were supplied for Nilkamal.</p></div><time>Source</time></div>}<div className="alert-row good"><span>✓</span><div><strong>Billing history validated</strong><p>Six distinct monthly grand totals are loaded with no duplicate client/month pairs.</p></div><time>Aug 22</time></div></>; }
+function AlertRows({ clientName, profileStatus }: { clientName: ClientName; profileStatus?: AwsProfileStatus }) { return <>{profileStatus?.connected ? <div className="alert-row good"><span>✓</span><div><strong>AWS profile verified</strong><p>{clients[clientName].profile} is connected to account {profileStatus.accountId} through the read-only local connector.</p></div><time>Live</time></div> : <div className="alert-row warning"><span>!</span><div><strong>Local AWS connector unavailable</strong><p>Stratus could not verify profile “{clients[clientName].profile}” from this runtime. Stored data remains available.</p></div><time>Now</time></div>}{clientName === "Nilkamal" && <div className="alert-row"><span>i</span><div><strong>Infrastructure document missing</strong><p>Only historical bills were supplied for Nilkamal.</p></div><time>Source</time></div>}<div className="alert-row good"><span>✓</span><div><strong>Billing history validated</strong><p>Six distinct monthly grand totals are loaded with no duplicate client/month pairs.</p></div><time>Aug 22</time></div></>; }
 function average(values: number[]) { return values.reduce((sum, value) => sum + value, 0) / values.length; }
 function formatPercent(value: number, showPositiveSign = false) { const normalized = Math.abs(value) < 0.05 ? 0 : value; return `${showPositiveSign && normalized > 0 ? "+" : ""}${normalized.toFixed(1)}%`; }
 function csvCell(value: string) { return /[",\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value; }
