@@ -164,16 +164,46 @@ button:disabled { cursor: not-allowed; opacity: .62; transform: none!important; 
 @media (max-width:1000px) { .stratus-shell { grid-template-columns:78px minmax(0,1fr); }.brand>span:last-child,.nav-group>p,.managed-clients>p,.managed-clients button span,.sidebar-art { display:none; }.sidebar nav button { justify-content:center; padding:0; font-size:0; }.sidebar nav button>span { width:auto; }.managed-clients button { display:flex; justify-content:center; padding:5px; }.managed-clients b { display:none; }.portfolio-spend,.portfolio-cost,.portfolio-clients,.portfolio-attention,.portfolio-drivers,.portfolio-status { grid-column:1/-1; }.topbar { grid-template-columns:1fr auto; }.topbar .search { grid-column:1/-1; grid-row:2; }.outline-button { display:none; } }
 @media (max-width:680px) { .stratus-shell { display:block; }.sidebar { position:fixed; top:auto; right:0; bottom:0; left:0; z-index:70; display:block; width:auto; height:70px; padding:8px; overflow-x:auto; }.brand,.managed-clients { display:none; }.sidebar nav { display:flex; gap:5px; }.nav-group { display:flex; }.sidebar nav button { min-width:50px; }.content { padding:16px 12px 135px; }.org-kpis { grid-template-columns:1fr 1fr; }.portfolio-grid { grid-template-columns:1fr; }.portfolio-grid>.panel { grid-column:1; }.topbar { padding:14px 15px; }.topbar h1 { font-size:22px; }.directory-grid { grid-template-columns:1fr; }.pricing-drawer { width:100%; }.pricing-drawer .benchmark-grid { grid-template-columns:1fr; } }
 
-/* Dual-currency values keep USD prominent and INR adjacent without visual noise. */
-.money-pair { display:inline-grid; gap:2px; min-width:0; vertical-align:middle; line-height:1.08; font-variant-numeric:tabular-nums; }
-.money-pair .money-primary { color:inherit; font:inherit; white-space:nowrap; }
-.money-pair .money-secondary { color:var(--muted); font-size:.56em; font-weight:650; letter-spacing:0; white-space:nowrap; }
-.money-pair.compact { gap:1px; }
-.money-pair.compact .money-secondary { font-size:.72em; }
-.cost-client-list .money-pair,.legend .money-pair,.data-list .money-pair,.driver-list .money-pair { justify-items:end; text-align:right; }
-.stacked-column>.money-pair,.bar-column>.money-pair { justify-items:center; text-align:center; }
+/* Dual-currency figures are two distinct, equally legible data columns. */
+.money-pair { display:inline-grid; grid-template-columns:max-content 1px max-content; align-items:stretch; gap:10px; min-width:0; max-width:100%; vertical-align:middle; color:var(--ink-strong); font-variant-numeric:tabular-nums; }
+.money-denomination { display:grid; align-content:center; gap:3px; min-width:0; text-align:left; }
+.money-code { color:var(--muted); font-size:8px!important; font-weight:800!important; line-height:1!important; letter-spacing:.12em!important; text-transform:uppercase; }
+.money-value { color:inherit; font:inherit; font-weight:inherit; line-height:1.08!important; letter-spacing:-.025em!important; white-space:nowrap; }
+.money-divider { display:block; width:1px; min-height:30px; background:linear-gradient(180deg,transparent,var(--line-strong) 22% 78%,transparent); }
+.money-pair.compact { gap:7px; }
+.money-pair.compact .money-code { font-size:7px!important; }
+.money-pair.compact .money-value { font-size:11px!important; font-weight:700!important; }
+.money-pair.compact .money-divider { min-height:25px; }
+.kpi>div:last-child { flex:1; min-width:0; }
+.kpi>div:last-child>strong { width:100%; }
+.kpi .money-pair { width:100%; grid-template-columns:minmax(0,1fr) 1px minmax(0,1fr); margin:1px 0 7px; }
+.kpi .money-denomination { min-width:max-content; }
+.kpi .money-value { font-size:clamp(15px,1.15vw,20px)!important; }
+.org-kpis { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.cost-client-list .money-pair,.legend .money-pair,.data-list .money-pair,.driver-list .money-pair { justify-self:end; text-align:right; }
+.cost-client-list .money-denomination,.legend .money-denomination,.data-list .money-denomination,.driver-list .money-denomination { text-align:right; }
+.stacked-column .money-pair,.bar-column .money-pair { display:grid; width:100%; grid-template-columns:1fr; justify-self:center; gap:2px; text-align:center; }
+.stacked-column .money-denomination,.bar-column .money-denomination { display:grid; justify-items:center; gap:1px; text-align:center; }
+.stacked-column .money-code,.bar-column .money-code { font-size:6px!important; }
+.stacked-column .money-value,.bar-column .money-value { font-size:9px!important; letter-spacing:-.04em!important; }
+.stacked-column .money-divider,.bar-column .money-divider { width:72%; height:1px; min-height:1px; margin:auto; background:var(--line); }
+.stacked-column .money-code,.bar-column .money-code { flex:0 0 auto; font-size:6px!important; }
+.stacked-column .money-value,.bar-column .money-value { min-width:0; font-size:9px!important; letter-spacing:-.04em!important; }
+.stacked-column>span,.bar-column>span { width:100%; white-space:normal; }
+.portfolio-donut .money-pair { display:grid; width:86px; grid-template-columns:1fr; gap:2px; }
+.portfolio-donut .money-denomination { display:flex; align-items:center; justify-content:space-between; gap:4px; }
+.portfolio-donut .money-divider { width:100%; height:1px; min-height:1px; background:var(--line); }
+.portfolio-donut .money-value { font-size:9px!important; }
+.pricing-result>strong .money-pair { gap:14px; }
+.pricing-result>strong .money-code { color:color-mix(in srgb,var(--client-accent) 64%,var(--muted)); }
+.pricing-result-line b,.benchmark-card>strong { min-width:0; }
+.pricing-result-line .money-pair,.benchmark-card>.money-pair { justify-self:end; }
 .currency-policy { align-content:center; padding:9px 11px; border:1px solid var(--line); border-radius:10px; background:#fafcf9; }
 .currency-policy>strong { color:var(--ink-strong); font-size:12px; }
+@media (max-width:1380px) { .org-kpis { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media (max-width:1100px) { .org-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:860px) { .org-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }.kpi .money-value { font-size:16px!important; } }
+@media (max-width:590px) { .org-kpis { grid-template-columns:1fr; }.money-pair { gap:8px; }.kpi .money-value { font-size:17px!important; } }
 
 /* Keep the pricing dialog as a self-contained compositor and scroll surface. */
 .pricing-drawer-backdrop { overflow:hidden; overscroll-behavior:none; backdrop-filter:none; touch-action:none; }

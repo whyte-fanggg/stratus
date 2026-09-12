@@ -3802,12 +3802,24 @@ function MoneyPair({ value, compact = false }: { value: number; compact?: boolea
   const inr = new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-    maximumFractionDigits: compact ? 0 : 2,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value * PRICING_SNAPSHOT.fx.usdToInr);
   return (
-    <span className={`money-pair${compact ? " compact" : ""}`} title={`AWS conversion rate: 1 USD = ₹${PRICING_SNAPSHOT.fx.usdToInr}`}>
-      <span className="money-primary">{usd.format(value)}</span>
-      <span className="money-secondary">{inr}</span>
+    <span
+      className={`money-pair${compact ? " compact" : ""}`}
+      title={`Converted using the AWS statement rate: 1 USD = ₹${PRICING_SNAPSHOT.fx.usdToInr}`}
+      aria-label={`${usd.format(value)}; ${inr}`}
+    >
+      <span className="money-denomination money-usd">
+        <span className="money-code">USD</span>
+        <span className="money-value">{usd.format(value)}</span>
+      </span>
+      <span className="money-divider" aria-hidden="true" />
+      <span className="money-denomination money-inr">
+        <span className="money-code">INR</span>
+        <span className="money-value">{inr}</span>
+      </span>
     </span>
   );
 }
