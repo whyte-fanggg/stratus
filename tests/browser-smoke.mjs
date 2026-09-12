@@ -203,6 +203,12 @@ try {
   writeFileSync(join(artifacts, "stratus-fusion-dashboard-1366.png"), Buffer.from(pageShot.data, "base64"));
   assert.equal(await evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true);
 
+  for (const [width, height] of [[1600, 900], [1440, 900], [1280, 800]]) {
+    await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+    await delay(100);
+    assert.equal(await evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true);
+  }
+
   await send("Emulation.setDeviceMetricsOverride", { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
   await delay(250);
   pageShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
