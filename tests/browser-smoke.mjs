@@ -194,6 +194,24 @@ try {
     assert.equal(await evaluate(`document.querySelector(".content h2")?.textContent`), heading);
   }
 
+  await send("Emulation.setDeviceMetricsOverride", { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
+  await delay(250);
+  const clippedMoney = await evaluate(`
+    [...document.querySelectorAll(".money-pair")]
+      .filter((node) => node.offsetParent)
+      .filter((node) => {
+        const container = node.closest(".kpi, .billing-bars > div, .cost-client-list > div, .data-list > div, .driver-list > div, .pricing-result-line, .benchmark-card, .org-client-grid > button, .portfolio-donut > div");
+        if (!container) return false;
+        const value = node.getBoundingClientRect();
+        const bounds = container.getBoundingClientRect();
+        return value.left < bounds.left - 1 || value.right > bounds.right + 1;
+      })
+      .map((node) => node.innerText)
+  `);
+  assert.deepEqual(clippedMoney, [], `Currency values must remain inside their containers: ${clippedMoney.join(" | ")}`);
+  pageShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+  writeFileSync(join(artifacts, "stratus-fusion-billing-1366.png"), Buffer.from(pageShot.data, "base64"));
+
   await evaluate(`[...document.querySelectorAll("nav button")].find((node) => node.textContent.trim() === "Infrastructure")?.click()`);
   await delay(250);
   assert.deepEqual(await evaluate(`[...document.querySelectorAll(".inventory-filters select")].map((node) => node.getAttribute("aria-label"))`), [

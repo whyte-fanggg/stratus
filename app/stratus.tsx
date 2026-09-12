@@ -3786,14 +3786,14 @@ function Kpi({
 }) {
   return (
     <article className={`kpi kpi-${tone}`}>
-      <div className={`kpi-icon ${tone}`}>
-        <AppIcon name={icon} size={18} />
-      </div>
-      <div>
+      <div className="kpi-heading">
+        <div className={`kpi-icon ${tone}`}>
+          <AppIcon name={icon} size={18} />
+        </div>
         <p>{title}</p>
-        <strong>{value}</strong>
-        <span className={tone}>{note}</span>
       </div>
+      <strong className="kpi-value">{value}</strong>
+      <span className={`kpi-note ${tone}`}>{note}</span>
     </article>
   );
 }

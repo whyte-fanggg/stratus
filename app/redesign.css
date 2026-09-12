@@ -174,10 +174,13 @@ button:disabled { cursor: not-allowed; opacity: .62; transform: none!important; 
 .money-pair.compact .money-code { font-size:7px!important; }
 .money-pair.compact .money-value { font-size:11px!important; font-weight:700!important; }
 .money-pair.compact .money-divider { min-height:25px; }
-.kpi>div:last-child { flex:1; min-width:0; }
-.kpi>div:last-child>strong { width:100%; }
+.kpi { display:grid; grid-template-columns:1fr; grid-template-rows:auto auto auto; align-content:start; gap:8px; }
+.kpi>.kpi-heading { position:relative; z-index:1; display:flex; flex:none; align-items:center; gap:10px; min-width:0; }
+.kpi>.kpi-heading p { min-width:0; margin:0; }
+.kpi>.kpi-value { position:relative; z-index:1; width:100%; margin:2px 0 0; }
+.kpi>.kpi-note { position:relative; z-index:1; display:block; min-width:0; line-height:1.35; }
 .kpi .money-pair { width:100%; grid-template-columns:minmax(0,1fr) 1px minmax(0,1fr); margin:1px 0 7px; }
-.kpi .money-denomination { min-width:max-content; }
+.kpi .money-denomination { min-width:0; }
 .kpi .money-value { font-size:clamp(15px,1.15vw,20px)!important; }
 .org-kpis { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .cost-client-list .money-pair,.legend .money-pair,.data-list .money-pair,.driver-list .money-pair { justify-self:end; text-align:right; }
@@ -198,12 +201,20 @@ button:disabled { cursor: not-allowed; opacity: .62; transform: none!important; 
 .pricing-result>strong .money-code { color:color-mix(in srgb,var(--client-accent) 64%,var(--muted)); }
 .pricing-result-line b,.benchmark-card>strong { min-width:0; }
 .pricing-result-line .money-pair,.benchmark-card>.money-pair { justify-self:end; }
+.billing-bars { gap:12px; }
+.billing-bars>div { grid-template-columns:minmax(250px,.45fr) minmax(160px,1fr); gap:22px; padding:4px 0; }
+.billing-bars>div>span { display:grid; grid-template-columns:64px minmax(0,1fr); align-items:center; gap:12px; }
+.billing-bars>div>span>small { display:block; min-width:0; }
+.billing-bars .money-pair { width:100%; grid-template-columns:minmax(0,1fr) 1px minmax(0,1fr); }
+.billing-bars .money-denomination { min-width:0; }
+.billing-bars .money-value { font-size:11px!important; }
 .currency-policy { align-content:center; padding:9px 11px; border:1px solid var(--line); border-radius:10px; background:#fafcf9; }
 .currency-policy>strong { color:var(--ink-strong); font-size:12px; }
 @media (max-width:1380px) { .org-kpis { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width:1100px) { .org-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:860px) { .org-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }.kpi .money-value { font-size:16px!important; } }
 @media (max-width:590px) { .org-kpis { grid-template-columns:1fr; }.money-pair { gap:8px; }.kpi .money-value { font-size:17px!important; } }
+@media (max-width:760px) { .billing-bars>div { grid-template-columns:1fr; gap:9px; }.billing-bars>div>span { grid-template-columns:72px minmax(0,1fr); } }
 
 /* Keep the pricing dialog as a self-contained compositor and scroll surface. */
 .pricing-drawer-backdrop { overflow:hidden; overscroll-behavior:none; backdrop-filter:none; touch-action:none; }
