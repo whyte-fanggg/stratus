@@ -13,6 +13,8 @@ export async function GET(request: Request) {
     const incoming = new URL(request.url);
     const upstream = new URL("/v1/aws/inventory", baseUrl);
     if (incoming.searchParams.get("refresh") === "1") upstream.searchParams.set("refresh", "1");
+    const client = incoming.searchParams.get("client");
+    if (client) upstream.searchParams.set("client", client);
     const response = await fetch(upstream, { cache: "no-store", signal: AbortSignal.timeout(90_000) });
     const body = await response.text();
     return new Response(body, {

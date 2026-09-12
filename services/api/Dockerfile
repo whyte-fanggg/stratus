@@ -1,7 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 RUN corepack enable
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY tsconfig.json ./
 COPY src ./src
@@ -13,9 +13,10 @@ ENV NODE_ENV=production \
     AWS_SDK_LOAD_CONFIG=1
 WORKDIR /app
 RUN corepack enable
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 COPY --from=build /app/dist ./dist
+RUN mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 4000
 CMD ["node", "dist/server.js"]

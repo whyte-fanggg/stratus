@@ -3,6 +3,7 @@ export type ClientName = (typeof clientOrder)[number];
 
 export type BillMonth = {
   month: string;
+  year: number;
   total: number;
   preTax: number;
   topService: string;
@@ -40,7 +41,7 @@ type ClientData = {
 
 function bills(rows: Array<[string, number, number, number, string, number]>): BillMonth[] {
   return rows.map(([month, total, preTax, topServiceCost, topRegion, topRegionCost]) => ({
-    month, total, preTax, topService: "Elastic Compute Cloud", topServiceCost, topRegion, topRegionCost,
+    month, year: 2026, total, preTax, topService: "Elastic Compute Cloud", topServiceCost, topRegion, topRegionCost,
   }));
 }
 

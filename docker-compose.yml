@@ -8,11 +8,15 @@ services:
       AWS_PROFILE_SWASTIKS: ${AWS_PROFILE_SWASTIKS:-swastiks}
       AWS_PROFILE_FUSION: ${AWS_PROFILE_FUSION:-fusion}
       AWS_REGION: ap-south-1
+      BILLING_DATA_DIR: /data
     volumes:
       - type: bind
         source: ${AWS_CONFIG_DIR:?Set AWS_CONFIG_DIR to the host .aws directory}
         target: /home/node/.aws
         read_only: true
+      - type: volume
+        source: stratus-billing-data
+        target: /data
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:4000/health"]
       interval: 10s
@@ -32,7 +36,7 @@ services:
       stratus-api:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
       interval: 10s
@@ -40,3 +44,6 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+
+volumes:
+  stratus-billing-data:

@@ -41,7 +41,9 @@ next-env.d.ts
 **/dist/
 /.wrangler/
 /outputs/
+/artifacts/
 /work/
+/tmp/
 /.pnpm-store/
 .codex-dev*.log
 tsconfig.tsbuildinfo

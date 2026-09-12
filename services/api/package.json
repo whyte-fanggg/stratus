@@ -13,17 +13,18 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aws-sdk/client-backup": "3.1115.0",
     "@aws-sdk/client-ec2": "3.1115.0",
     "@aws-sdk/client-iam": "3.1115.0",
     "@aws-sdk/client-s3": "3.1115.0",
     "@aws-sdk/client-sts": "3.1115.0",
     "@aws-sdk/credential-providers": "3.1115.0",
-    "express": "5.2.1"
+    "express": "5.2.1",
+    "pdf-parse": "1.1.1"
   },
   "devDependencies": {
     "@types/express": "5.0.6",
     "@types/node": "26.2.0",
+    "@types/pdf-parse": "1.1.5",
     "typescript": "7.0.2"
   }
 }

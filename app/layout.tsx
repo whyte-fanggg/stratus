@@ -6,6 +6,7 @@ export const metadata = {
   title: "Stratus — Multi-client AWS operations",
   description:
     "Read-only AWS infrastructure, backup, network, IAM, alert, and billing visibility for four managed clients.",
+  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
   alternates: { canonical: "/" },
   openGraph: {
     title: "Stratus — Multi-client AWS operations",
