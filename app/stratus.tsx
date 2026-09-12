@@ -687,7 +687,7 @@ export function StratusApp() {
     try {
       const response = await fetch("/api/billing/upload", { method: "POST", body: form });
       const data = (await response.json()) as {
-        bill?: { client: ClientName; month: string; year: number; totalCents: number };
+        bill?: { client: ClientName; month: string; year: number; totalCents: number; currency?: "USD" | "INR" };
         billing?: BillingByClientView;
         replaced?: boolean;
         error?: string;
@@ -697,7 +697,7 @@ export function StratusApp() {
       setSelectedClient(data.bill.client);
       setUploadState("success");
       setUploadMessage(
-        `${data.bill.client} · ${data.bill.month} ${data.bill.year} imported at ${usd.format(data.bill.totalCents / 100)}${data.replaced ? " · existing period updated" : ""}.`,
+        `${data.bill.client} · ${data.bill.month} ${data.bill.year} imported at ${data.bill.currency === "INR" ? new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(data.bill.totalCents / 100) : usd.format(data.bill.totalCents / 100)}${data.bill.currency === "INR" ? ` · normalized to USD at ₹${PRICING_SNAPSHOT.fx.usdToInr}/USD` : ""}${data.replaced ? " · existing period updated" : ""}.`,
       );
       void readPortfolioOverview().then(setPortfolioState);
     } catch (error) {

@@ -1,10 +1,12 @@
 import { clientOrder, clients, type BillMonth, type ClientName } from "../../app/stratus-data.ts";
+import { PRICING_SNAPSHOT } from "../../pricing/aws-pricing-snapshot.ts";
 
 export type UploadedBillingRecord = {
   client: ClientName;
   month: string;
   monthKey: string;
   year: number;
+  currency?: "USD" | "INR";
   totalCents: number;
   preTaxCents: number;
   topService: string;
@@ -33,15 +35,16 @@ export function mergeUploadedBilling(records: UploadedBillingRecord[]): BillingB
       if (number) periods.set(`2026-${number}`, { ...bill });
     }
     for (const record of records.filter((item) => item.client === clientName)) {
+      const toUsd = record.currency === "INR" ? 1 / PRICING_SNAPSHOT.fx.usdToInr : 1;
       periods.set(record.monthKey, {
         month: record.month,
         year: record.year,
-        total: record.totalCents / 100,
-        preTax: record.preTaxCents / 100,
+        total: record.totalCents / 100 * toUsd,
+        preTax: record.preTaxCents / 100 * toUsd,
         topService: record.topService,
-        topServiceCost: record.topServiceCents / 100,
+        topServiceCost: record.topServiceCents / 100 * toUsd,
         topRegion: record.topRegion,
-        topRegionCost: record.topRegionCents / 100,
+        topRegionCost: record.topRegionCents / 100 * toUsd,
       });
     }
     return [clientName, [...periods.entries()]

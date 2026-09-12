@@ -6,7 +6,7 @@ export type ParsedBill = {
   periodEnd: string;
   accountId: string;
   provider: string;
-  currency: "USD";
+  currency: "USD" | "INR";
   preTaxCents: number;
   taxCents: number;
   totalCents: number;
@@ -29,6 +29,11 @@ const monthNumbers: Record<string, number> = {
   Oct: 10,
   Nov: 11,
   Dec: 12,
+};
+
+const fullMonthToShort: Record<string, string> = {
+  January: "Jan", February: "Feb", March: "Mar", April: "Apr", May: "May", June: "Jun",
+  July: "Jul", August: "Aug", September: "Sep", October: "Oct", November: "Nov", December: "Dec",
 };
 
 export function parseUsdToCents(value: string): number {
@@ -54,6 +59,9 @@ function optionalAmount(match: RegExpMatchArray | null): number {
 
 export function parseAwsBillText(text: string): ParsedBill {
   const normalized = text.replaceAll("\r", "");
+  if (/GST Invoice Summary/i.test(normalized) && /TOTAL AMOUNT DUE/i.test(normalized)) {
+    return parseIndiaGstInvoice(normalized);
+  }
   const period = normalized.match(/\b([A-Z][a-z]{2})\s+(\d{1,2})\s*-\s*([A-Z][a-z]{2})\s+(\d{1,2}),\s*(\d{4})\b/);
   const account = normalized.match(/Billing period[\s\S]{0,180}?\b(\d{12})\b/) ?? normalized.match(/\b(\d{12})\b/);
   // PDF extractors do not agree on whether adjacent text runs retain a space.
@@ -91,6 +99,53 @@ export function parseAwsBillText(text: string): ParsedBill {
     topServiceCents: optionalAmount(topServiceAmount),
     topRegion: regionLabel,
     topRegionCents: optionalAmount(topRegionAmount),
+  };
+}
+
+function parseIndiaGstInvoice(normalized: string): ParsedBill {
+  const period = normalized.match(/billing period\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\s*-\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})/i);
+  const account = normalized.match(/Account number:\s*(\d{12})/i);
+  const total = normalized.match(/TOTAL AMOUNT DUE ON[\s\S]{0,100}?Rs\.\s*([\d,]+\.\d{2})/i);
+  const summary = normalized.match(/AWS Service Charges\s*Rs\.\s*[\d,]+\.\d{2}\s+Charges\s*Rs\.\s*([\d,]+\.\d{2})\s+Credits\/Discount/i);
+  const tax = normalized.match(/TOTAL GST\s*Rs\.\s*([\d,]+\.\d{2})/i);
+  const provider = normalized.match(/Amazon Web Services India Private Limited/i);
+  if (!period || !account || !total || !summary || !tax || !provider) {
+    throw new Error("Unsupported or malformed AWS India GST invoice layout");
+  }
+
+  const startMonth = fullMonthToShort[period[1]![0]!.toUpperCase() + period[1]!.slice(1).toLowerCase()];
+  const endMonth = fullMonthToShort[period[3]![0]!.toUpperCase() + period[3]!.slice(1).toLowerCase()];
+  if (!startMonth || !endMonth) throw new Error("Unsupported billing month");
+  const preTaxCents = parseUsdToCents(summary[1]!);
+  const taxCents = parseUsdToCents(tax[1]!);
+  const totalCents = parseUsdToCents(total[1]!);
+  if (Math.abs(preTaxCents + taxCents - totalCents) > 2) {
+    throw new Error("GST invoice total does not reconcile with pre-tax charges and tax");
+  }
+
+  const excluded = /^(AWS Service Charges|Detailed Usage)/i;
+  const serviceRows = [...normalized.matchAll(/^([^\n]+?)\s*Rs\.\s*([\d,]+\.\d{2})\s*$/gim)]
+    .map((match) => ({ name: match[1]!.trim(), cents: parseUsdToCents(match[2]!) }))
+    .filter((row) => !excluded.test(row.name) && /^(Amazon|AWS|Elastic)/i.test(row.name));
+  const topService = serviceRows.sort((left, right) => right.cents - left.cents)[0];
+  const startMonthNumber = monthNumbers[startMonth]!;
+
+  return {
+    month: startMonth,
+    monthKey: `${period[5]}-${String(startMonthNumber).padStart(2, "0")}`,
+    year: Number(period[5]),
+    periodStart: isoDate(startMonth, period[2]!, period[5]!),
+    periodEnd: isoDate(endMonth, period[4]!, period[5]!),
+    accountId: account[1]!,
+    provider: "Amazon Web Services India Private Limited",
+    currency: "INR",
+    preTaxCents,
+    taxCents,
+    totalCents,
+    topService: topService?.name ?? "Unclassified AWS services",
+    topServiceCents: topService?.cents ?? 0,
+    topRegion: "Unclassified",
+    topRegionCents: 0,
   };
 }
 

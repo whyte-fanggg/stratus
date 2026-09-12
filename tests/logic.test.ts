@@ -39,6 +39,19 @@ test("AWS bill parser validates period, account, totals, service, and region", (
   assert.equal(parsed.topRegionCents, 31983);
 });
 
+test("AWS India GST tax invoices parse and reconcile in INR", () => {
+  const parsed = parseAwsBillText(`GST Invoice\nAccount number:\n254552067866\nGST Invoice Summary\nTOTAL AMOUNT DUE ON\nSeptember 2, 2026\nRs. 330,951.60\nTOTAL GST Rs. 50,484.14\nThis GST Invoice is for the billing period August 1 - August 31, 2026\nAmazon Web Services India Private Limited\nGST Invoice Summary\nAWS Service Charges Rs. 330,951.60\nCharges Rs. 280,467.46\nCredits/Discount Rs. 0.00\nAmazon Simple Storage Service Rs. 11,791.55\nAmazon Elastic Compute Cloud Rs. 268,070.90`);
+  assert.equal(parsed.currency, "INR");
+  assert.equal(parsed.monthKey, "2026-08");
+  assert.equal(parsed.accountId, "254552067866");
+  assert.equal(parsed.totalCents, 33_095_160);
+  assert.equal(parsed.preTaxCents, 28_046_746);
+  assert.equal(parsed.taxCents, 5_048_414);
+  assert.equal(parsed.topService, "Amazon Elastic Compute Cloud");
+  assert.equal(parsed.topServiceCents, 26_807_090);
+  assert.equal(parsed.topRegion, "Unclassified");
+});
+
 test("uploaded billing replaces matching periods and retains a six-month window", () => {
   const merged = mergeUploadedBilling([{
     client: "Fusion", month: "Aug", monthKey: "2026-08", year: 2026,
