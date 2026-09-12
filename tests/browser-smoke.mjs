@@ -85,8 +85,8 @@ try {
   await waitForApplicationShell();
   const dashboard = await evaluate(`({
     title: document.querySelector("h1")?.textContent,
-    clients: [...document.querySelectorAll(".managed-clients button span")].map((node) => node.textContent),
-    selectedClientCount: document.querySelectorAll(".managed-clients button.active").length,
+    clients: [...document.querySelectorAll(".client-strip-track button span")].map((node) => node.textContent),
+    selectedClientCount: document.querySelectorAll(".client-strip-track button.selected").length,
     body: document.body.innerText,
   })`);
   assert.equal(dashboard.title, "Cloud Operations Overview");
@@ -95,7 +95,7 @@ try {
   assert.equal(dashboard.body.includes("Skubiq"), false);
 
   for (const client of ["Nilkamal", "GCPL", "Swastiks", "Fusion"]) {
-    await evaluate(`[...document.querySelectorAll(".managed-clients button")].find((node) => node.textContent.includes(${JSON.stringify(client)}))?.click()`);
+    await evaluate(`[...document.querySelectorAll(".client-strip-track button")].find((node) => node.textContent.includes(${JSON.stringify(client)}))?.click()`);
     await delay(400);
     assert.equal(await evaluate(`document.querySelector("h1")?.textContent`), `${client} overview`);
   }
@@ -146,19 +146,31 @@ try {
   assert.match(drawerText, /Data transfer/);
   assert.match(drawTextSafe(drawerText), /CloudWatch/);
   assert.match(drawTextSafe(drawerText), /CloudTrail/);
+  const pricingIsolation = await evaluate(`({
+    bodyOverflow: getComputedStyle(document.body).overflow,
+    drawerOverflow: getComputedStyle(document.querySelector(".pricing-drawer")).overflow,
+    viewportOverflowY: getComputedStyle(document.querySelector(".pricing-drawer > .pricing-page")).overflowY,
+    viewportOverscroll: getComputedStyle(document.querySelector(".pricing-drawer > .pricing-page")).overscrollBehaviorY,
+    clientsNavRemoved: ![...document.querySelectorAll("nav button")].some((node) => node.textContent.trim() === "Clients"),
+  })`);
+  assert.equal(pricingIsolation.bodyOverflow, "hidden");
+  assert.equal(pricingIsolation.drawerOverflow, "hidden");
+  assert.equal(pricingIsolation.viewportOverflowY, "auto");
+  assert.equal(pricingIsolation.viewportOverscroll, "contain");
+  assert.equal(pricingIsolation.clientsNavRemoved, true);
   const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
   writeFileSync(join(artifacts, "stratus-pricing-drawer.png"), Buffer.from(screenshot.data, "base64"));
 
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
-  await delay(250);
+  await delay(350);
   assert.equal(await evaluate(`Boolean(document.querySelector('[role="dialog"][aria-label="AWS Pricing"]'))`), false);
 
   await evaluate(`[...document.querySelectorAll("nav button")].find((node) => node.textContent.trim() === "Backups")?.click()`);
   await delay(250);
   assert.match(await evaluate(`document.body.innerText`), /Backup health across workloads/);
 
-  await evaluate(`[...document.querySelectorAll(".managed-clients button")].find((node) => node.textContent.includes("Fusion"))?.click()`);
+  await evaluate(`[...document.querySelectorAll(".client-strip-track button")].find((node) => node.textContent.includes("Fusion"))?.click()`);
   await delay(350);
   assert.equal(await evaluate(`document.querySelector("h1")?.textContent`), "Fusion overview");
   await evaluate(`[...document.querySelectorAll("nav button")].find((node) => node.textContent.trim() === "Backups")?.click()`);

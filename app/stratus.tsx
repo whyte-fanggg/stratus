@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   clientOrder,
   clients,
@@ -62,7 +62,6 @@ const navGroups: ReadonlyArray<{
   {
     label: "Operations",
     items: [
-      ["Clients", "clients"],
       ["Billing", "billing"],
       ["Backups", "cloud"],
       ["Infrastructure", "servers"],
@@ -405,6 +404,7 @@ export function StratusApp() {
   const [regionFilter, setRegionFilter] = useState("All regions");
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [pricingOpen, setPricingOpen] = useState(false);
+  const [pricingClosing, setPricingClosing] = useState(false);
   const [assistantQuestion, setAssistantQuestion] = useState("");
   const [assistantAnswer, setAssistantAnswer] = useState("");
   const [assistantPending, setAssistantPending] = useState(false);
@@ -443,6 +443,7 @@ export function StratusApp() {
   const refreshRunRef = useRef(false);
   const pricingTriggerRef = useRef<HTMLButtonElement>(null);
   const pricingDrawerRef = useRef<HTMLElement>(null);
+  const pricingCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const client = { ...clients[selectedClient], bills: billingByClient[selectedClient] };
   const globalSpend = useMemo(
     () => portfolioState.data?.spend.currentPeriod ?? clientOrder.reduce(
@@ -566,8 +567,24 @@ export function StratusApp() {
     };
   }, [assistantOpen]);
 
+  const closePricing = useCallback(() => {
+    if (pricingCloseTimerRef.current) clearTimeout(pricingCloseTimerRef.current);
+    setPricingClosing(true);
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    pricingCloseTimerRef.current = setTimeout(() => {
+      setPricingOpen(false);
+      setPricingClosing(false);
+      pricingTriggerRef.current?.focus();
+    }, reducedMotion ? 0 : 280);
+  }, []);
+
   useEffect(() => {
     if (!pricingOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
     const drawer = pricingDrawerRef.current;
     const focusable = () => [
       ...(drawer?.querySelectorAll<HTMLElement>(
@@ -577,8 +594,7 @@ export function StratusApp() {
     focusable()[0]?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setPricingOpen(false);
-        pricingTriggerRef.current?.focus();
+        closePricing();
         return;
       }
       if (event.key !== "Tab") return;
@@ -595,8 +611,12 @@ export function StratusApp() {
       }
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [pricingOpen]);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
+    };
+  }, [closePricing, pricingOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -876,42 +896,6 @@ export function StratusApp() {
             </button>
           </section>
         </nav>
-        <section className="managed-clients" aria-label="Managed clients">
-          <p>Managed Clients</p>
-          {clientOrder.map((name) => (
-            <button
-              key={name}
-              onClick={() => {
-                setOrganizationView(false);
-                setSelectedClient(name);
-                setActivePage("Dashboard");
-                setSelectedServer(null);
-              }}
-              className={
-                !organizationView && name === selectedClient ? "active" : ""
-              }
-            >
-              <i style={{ background: clients[name].accent }}>
-                {clients[name].initials}
-              </i>
-              <span>{name}</span>
-              <b
-                className={
-                  awsStatus.profiles.find((profile) => profile.client === name)
-                    ?.connected
-                    ? "online"
-                    : ""
-                }
-                aria-label={
-                  awsStatus.profiles.find((profile) => profile.client === name)
-                    ?.connected
-                    ? "Connected"
-                    : "Unavailable"
-                }
-              />
-            </button>
-          ))}
-        </section>
         {!organizationView && (
           <div className="sidebar-art" aria-hidden="true">
             <img
@@ -1000,6 +984,32 @@ export function StratusApp() {
             </div>
           )}
         </header>
+
+        <section className="client-strip" aria-label="Managed clients">
+          <span>Client context</span>
+          <div className="client-strip-track">
+            {clientOrder.map((name) => {
+              const connected = awsStatus.profiles.find((profile) => profile.client === name)?.connected;
+              return (
+                <button
+                  key={name}
+                  onClick={() => {
+                    setOrganizationView(false);
+                    setSelectedClient(name);
+                    setActivePage("Dashboard");
+                    setSelectedServer(null);
+                  }}
+                  className={!organizationView && name === selectedClient ? "selected" : ""}
+                  aria-pressed={!organizationView && name === selectedClient}
+                >
+                  <i style={{ background: clients[name].accent }}>{clients[name].initials}</i>
+                  <span>{name}</span>
+                  <b className={connected ? "online" : ""} aria-label={connected ? "Connected" : "Unavailable"} />
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
         <div className="content">
           {activePage === "Dashboard" &&
@@ -1121,12 +1131,11 @@ export function StratusApp() {
       )}
       {pricingOpen && (
         <div
-          className="pricing-drawer-backdrop"
+          className={`pricing-drawer-backdrop${pricingClosing ? " closing" : ""}`}
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setPricingOpen(false);
-              pricingTriggerRef.current?.focus();
+              closePricing();
             }
           }}
         >
@@ -1144,10 +1153,7 @@ export function StratusApp() {
               </div>
               <button
                 aria-label="Close pricing"
-                onClick={() => {
-                  setPricingOpen(false);
-                  pricingTriggerRef.current?.focus();
-                }}
+                onClick={closePricing}
               >
                 <AppIcon name="close" />
               </button>
