@@ -37,7 +37,14 @@ export async function upsertBillingRecord(record: StoredBill): Promise<{ record:
     const records = await readBillingRecords();
     const existingIndex = records.findIndex((item) => item.client === record.client && item.monthKey === record.monthKey);
     const replaced = existingIndex >= 0;
-    if (replaced) records[existingIndex] = record;
+    if (replaced) {
+      const existing = records[existingIndex]!;
+      records[existingIndex] = {
+        ...record,
+        fxUsdToInr: record.fxUsdToInr ?? existing.fxUsdToInr ?? null,
+      };
+      record = records[existingIndex]!;
+    }
     else records.push(record);
     records.sort((left, right) => left.monthKey.localeCompare(right.monthKey));
     await mkdir(dataDirectory, { recursive: true });

@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       cache: "no-store",
       signal: AbortSignal.timeout(30_000),
     });
-    const payload = await upstream.json() as { bill?: UploadedBillingRecord; error?: string; replaced?: boolean; pagesParsed?: number; sourceRetained?: boolean };
+    const payload = await upstream.json() as { bill?: UploadedBillingRecord; bills?: UploadedBillingRecord[]; error?: string; replaced?: boolean; pagesParsed?: number; sourceRetained?: boolean };
     if (!upstream.ok || !payload.bill) {
       return Response.json({ error: payload.error ?? "Bill parsing failed.", sourceRetained: false }, { status: upstream.status });
     }

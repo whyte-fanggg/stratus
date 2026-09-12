@@ -6,7 +6,7 @@ import { GetGroupPolicyCommand, GetLoginProfileCommand, GetPolicyCommand, GetPol
 import { GetBucketLocationCommand, ListBucketsCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 import { fromIni } from "@aws-sdk/credential-providers";
-import { parseAwsBillText } from "./billing-parser.js";
+import { parseAwsBillText, parseAwsStatementAllocations } from "./billing-parser.js";
 import { readBillingRecords, upsertBillingRecord } from "./billing-store.js";
 import { allowsAdministrator, parseIamPolicyDocument } from "./iam-policy.js";
 import { readInventorySnapshot, writeInventorySnapshot, type InventorySnapshot } from "./inventory-store.js";
@@ -534,24 +534,28 @@ app.post("/v1/billing/upload", express.raw({ type: "application/pdf", limit: max
   try {
     const extracted = await pdfParse(bytes);
     if (!extracted.text.trim()) return response.status(422).json({ error: "No readable text was found in the PDF." });
-    const parsed = parseAwsBillText(extracted.text);
-    const client = MANAGED_CLIENTS.find((item) => item.accountId === parsed.accountId);
-    if (!client) return response.status(422).json({ error: `AWS account ${parsed.accountId} is not configured as a managed Stratus client.` });
+    const parsedBills = parseAwsStatementAllocations(extracted.text);
+    if (!parsedBills.length) parsedBills.push(parseAwsBillText(extracted.text));
+    const managedBills = parsedBills.flatMap((parsed) => {
+      const client = MANAGED_CLIENTS.find((item) => item.accountId === parsed.accountId);
+      return client ? [{ parsed, client }] : [];
+    });
+    if (!managedBills.length) return response.status(422).json({ error: "The document contains no configured Stratus client accounts." });
     const encodedName = request.header("x-stratus-file-name") ?? "AWS-bill.pdf";
     let fileName = "AWS-bill.pdf";
     try { fileName = decodeURIComponent(encodedName); } catch { /* Keep the safe fallback. */ }
     fileName = fileName.replace(/[\\/\u0000-\u001f]/g, "_").slice(0, 180) || "AWS-bill.pdf";
-    const stored = await upsertBillingRecord({
-      ...parsed,
-      client: client.name,
-      fileName,
-      sourceSha256: createHash("sha256").update(bytes).digest("hex"),
-      uploadedAt: new Date().toISOString(),
-    });
+    const sourceSha256 = createHash("sha256").update(bytes).digest("hex");
+    const uploadedAt = new Date().toISOString();
+    const stored = await Promise.all(managedBills.map(({ parsed, client }) => upsertBillingRecord({
+      ...parsed, client: client.name, fileName, sourceSha256, uploadedAt,
+    })));
+    stored.sort((left, right) => MANAGED_CLIENTS.findIndex((item) => item.name === left.record.client) - MANAGED_CLIENTS.findIndex((item) => item.name === right.record.client));
     response.setHeader("Cache-Control", "no-store");
-    return response.status(stored.replaced ? 200 : 201).json({
-      bill: stored.record,
-      replaced: stored.replaced,
+    return response.status(stored.every((item) => item.replaced) ? 200 : 201).json({
+      bill: stored[0]!.record,
+      bills: stored.map((item) => item.record),
+      replaced: stored.every((item) => item.replaced),
       pagesParsed: extracted.numpages,
       sourceRetained: false,
     });

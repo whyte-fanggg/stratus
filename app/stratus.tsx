@@ -687,7 +687,8 @@ export function StratusApp() {
     try {
       const response = await fetch("/api/billing/upload", { method: "POST", body: form });
       const data = (await response.json()) as {
-        bill?: { client: ClientName; month: string; year: number; totalCents: number; currency?: "USD" | "INR" };
+        bill?: { client: ClientName; month: string; year: number; totalCents: number; currency?: "USD" | "INR"; fxUsdToInr?: number | null };
+        bills?: Array<{ client: ClientName }>;
         billing?: BillingByClientView;
         replaced?: boolean;
         error?: string;
@@ -697,7 +698,7 @@ export function StratusApp() {
       setSelectedClient(data.bill.client);
       setUploadState("success");
       setUploadMessage(
-        `${data.bill.client} · ${data.bill.month} ${data.bill.year} imported at ${data.bill.currency === "INR" ? new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(data.bill.totalCents / 100) : usd.format(data.bill.totalCents / 100)}${data.bill.currency === "INR" ? ` · normalized to USD at ₹${PRICING_SNAPSHOT.fx.usdToInr}/USD` : ""}${data.replaced ? " · existing period updated" : ""}.`,
+        `${data.bills && data.bills.length > 1 ? `${data.bills.length} managed client allocations` : data.bill.client} · ${data.bill.month} ${data.bill.year} imported at ${data.bill.currency === "INR" ? new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(data.bill.totalCents / 100) : dualMoneyText(data.bill.totalCents / 100)} · FX ₹${data.bill.fxUsdToInr ?? PRICING_SNAPSHOT.fx.usdToInr}/USD${data.replaced ? " · existing period updated" : ""}.`,
       );
       void readPortfolioOverview().then(setPortfolioState);
     } catch (error) {
@@ -719,10 +720,10 @@ export function StratusApp() {
         previous = history.at(-2)!;
       const change = latest.total - previous.total,
         percent = previous.total ? (change / previous.total) * 100 : 0;
-      return `${namedClient}'s ${latest.month} bill ${change >= 0 ? "increased" : "decreased"} by ${usd.format(Math.abs(change))} (${Math.abs(percent).toFixed(1)}%) from ${usd.format(previous.total)} in ${previous.month} to ${usd.format(latest.total)}. Its top recorded service was ${latest.topService} at ${usd.format(latest.topServiceCost)}. The supplied bill summary does not include enough service-level line items to attribute the entire change more precisely.`;
+      return `${namedClient}'s ${latest.month} bill ${change >= 0 ? "increased" : "decreased"} by ${dualMoneyText(Math.abs(change))} (${Math.abs(percent).toFixed(1)}%) from ${dualMoneyText(previous.total)} in ${previous.month} to ${dualMoneyText(latest.total)}. Its top recorded service was ${latest.topService} at ${dualMoneyText(latest.topServiceCost)}. The supplied bill summary does not include enough service-level line items to attribute the entire change more precisely.`;
     }
     if (q.includes("highest") && q.includes("cost"))
-      return `Nilkamal's latest loaded bill is ${usd.format(billingByClient.Nilkamal.at(-1)!.total)}.`;
+      return `Nilkamal's latest loaded bill is ${dualMoneyText(billingByClient.Nilkamal.at(-1)!.total)}.`;
     if (q.includes("public ip"))
       return (
         allServers
@@ -731,7 +732,7 @@ export function StratusApp() {
           .join("\n") || "No public IPs were returned."
       );
     if (q.includes("gcpl") && q.includes("ec2"))
-      return `GCPL EC2 spend across the loaded periods: ${billingByClient.GCPL.map((b) => `${b.month} ${usd.format(b.topServiceCost)}`).join(", ")}.`;
+      return `GCPL EC2 spend across the loaded periods: ${billingByClient.GCPL.map((b) => `${b.month} ${dualMoneyText(b.topServiceCost)}`).join(", ")}.`;
     if (q.includes("stopped"))
       return inventoryState.state === "ready"
         ? allServers
@@ -1334,7 +1335,7 @@ function OrganizationDashboard({
         <Kpi
           icon="dollar"
           title="Current AWS spend"
-          value={usd.format(overview.spend.currentPeriod)}
+          value={<MoneyPair value={overview.spend.currentPeriod} />}
           note={
             !overview.spend.comparable
               ? `${overview.spend.currentPeriodLabel} · ${overview.spend.currentClientsLoaded}/${overview.spend.totalClients} clients loaded`
@@ -1384,7 +1385,7 @@ function OrganizationDashboard({
           >
             {overview.spend.sixMonthSeries.map((month) => (
               <div className="stacked-column" key={month.month}>
-                <span>{usd.format(month.total)}</span>
+                <span><MoneyPair value={month.total} compact /></span>
                 <div
                   style={{
                     height: `${Math.max(18, (month.total / max) * 100)}%`,
@@ -1393,7 +1394,7 @@ function OrganizationDashboard({
                   {month.values.map((entry) => (
                     <i
                       key={entry.client}
-                      title={`${entry.client}: ${usd.format(entry.value)}`}
+                      title={`${entry.client}: ${dualMoneyText(entry.value)}`}
                       style={{
                         height: `${month.total ? (entry.value / month.total) * 100 : 0}%`,
                         background: entry.accent,
@@ -1421,7 +1422,7 @@ function OrganizationDashboard({
             style={{ background: costDonut(overview.spend.byClient) }}
           >
             <div>
-              <strong>{usd.format(overview.spend.currentPeriod)}</strong>
+              <strong><MoneyPair value={overview.spend.currentPeriod} compact /></strong>
               <span>{overview.spend.currentPeriodLabel}</span>
             </div>
           </div>
@@ -1430,7 +1431,7 @@ function OrganizationDashboard({
               <div key={entry.client}>
                 <i style={{ background: entry.accent }} />
                 <span>{entry.client}</span>
-                <b>{usd.format(entry.value)}</b>
+                <b><MoneyPair value={entry.value} compact /></b>
               </div>
             ))}
           </div>
@@ -1510,7 +1511,7 @@ function OrganizationDashboard({
                     <small>Open dashboard →</small>
                   </div>
                 </header>
-                <b>{usd.format(item.currentSpend)}</b>
+                <b><MoneyPair value={item.currentSpend} /></b>
                 <p>
                   <span>{item.compute.running} running</span>
                   <span>{item.compute.stopped} stopped</span>
@@ -1565,7 +1566,7 @@ function OrganizationDashboard({
               <div key={item.service}>
                 <span>
                   <b>{item.service}</b>
-                  <small>{usd.format(item.value)}</small>
+                  <small><MoneyPair value={item.value} compact /></small>
                 </span>
                 <i>
                   <b
@@ -1667,9 +1668,7 @@ function ClientDirectory({
                   </div>
                 </header>
                 <b>
-                  {usd.format(
-                    item?.currentSpend ?? billing[name].at(-1)!.total,
-                  )}
+                  <MoneyPair value={item?.currentSpend ?? billing[name].at(-1)!.total} />
                 </b>
                 <p>
                   <span>
@@ -1727,19 +1726,19 @@ function PortfolioBilling({
             All totals reconcile to the same six-month client billing dataset.
           </p>
         </div>
-        <span className="source-badge">USD · source totals</span>
+        <span className="source-badge">USD + INR · AWS rate ₹{PRICING_SNAPSHOT.fx.usdToInr}</span>
       </section>
       <section className="summary-grid">
         <Kpi
           icon="dollar"
           title="Current period"
-          value={usd.format(overview.spend.currentPeriod)}
+          value={<MoneyPair value={overview.spend.currentPeriod} />}
           note={`${formatPercent(overview.spend.changePercent ?? 0, true)} vs prior period`}
         />
         <Kpi
           icon="billing"
           title="Previous period"
-          value={usd.format(overview.spend.previousPeriod)}
+          value={<MoneyPair value={overview.spend.previousPeriod} />}
           note="Equivalent source period"
         />
         <Kpi
@@ -1751,9 +1750,7 @@ function PortfolioBilling({
         <Kpi
           icon="sigma"
           title="Six-month average"
-          value={usd.format(
-            average(overview.spend.sixMonthSeries.map((month) => month.total)),
-          )}
+          value={<MoneyPair value={average(overview.spend.sixMonthSeries.map((month) => month.total))} />}
           note="Portfolio monthly average"
         />
       </section>
@@ -1765,7 +1762,7 @@ function PortfolioBilling({
               <div key={month.month}>
                 <span>
                   <b>{month.month} {month.year}</b>
-                  <small>{usd.format(month.total)}</small>
+                  <small><MoneyPair value={month.total} compact /></small>
                 </span>
                 <i>
                   <b style={{ width: `${(month.total / max) * 100}%` }} />
@@ -1781,7 +1778,7 @@ function PortfolioBilling({
               <div key={item.client}>
                 <i style={{ background: item.accent }} />
                 <span>{item.client}</span>
-                <b>{usd.format(item.value)}</b>
+                <b><MoneyPair value={item.value} compact /></b>
               </div>
             ))}
           </div>
@@ -1990,7 +1987,7 @@ function Dashboard({
         <Kpi
           icon="dollar"
           title="Selected client spend"
-          value={usd.format(latest.total)}
+          value={<MoneyPair value={latest.total} />}
           note={`${formatPercent(change, true)} vs ${prior.month}`}
           tone={change > 0.05 ? "warning" : "success"}
         />
@@ -2033,7 +2030,7 @@ function Dashboard({
         <Kpi
           icon="sigma"
           title="All-client spend"
-          value={usd.format(globalSpend)}
+          value={<MoneyPair value={globalSpend} />}
           note={globalSpendNote}
         />
       </section>
@@ -2046,7 +2043,7 @@ function Dashboard({
           />
           <div className="spend-summary">
             <div>
-              <strong>{usd.format(latest.total)}</strong>
+              <strong><MoneyPair value={latest.total} /></strong>
               <span>{latest.month} {latest.year} grand total</span>
             </div>
             <p className={change > 0 ? "up" : "down"}>
@@ -2056,7 +2053,7 @@ function Dashboard({
           <div className="bar-chart" aria-label="Six-month billing totals">
             {client.bills.map((bill) => (
               <div className="bar-column" key={bill.month}>
-                <span>{usd.format(bill.total)}</span>
+                <span><MoneyPair value={bill.total} compact /></span>
                 <i
                   style={{
                     height: `${Math.max(10, (bill.total / maxBill) * 100)}%`,
@@ -2070,7 +2067,7 @@ function Dashboard({
             <span>
               6-month average{" "}
               <strong>
-                {usd.format(average(client.bills.map((b) => b.total)))}
+                <MoneyPair value={average(client.bills.map((b) => b.total))} compact />
               </strong>
             </span>
             <span>
@@ -2169,7 +2166,6 @@ function PricingPage() {
   const [region, setRegion] = useState<RegionCode>("ap-south-1");
   const [os, setOs] = useState<OperatingSystem>("windows");
   const [purchase, setPurchase] = useState<PurchaseOption>("onDemand");
-  const [currency, setCurrency] = useState<"USD" | "INR">("USD");
   const [quantity, setQuantity] = useState(1);
   const [hours, setHours] = useState(730);
   const [storage, setStorage] = useState(500);
@@ -2253,7 +2249,7 @@ function PricingPage() {
     sns: snsMessages * b.snsMillion,
     config: configItems * b.configItem,
   };
-  const money = (value: number) => currency === "USD" ? usd.format(value) : new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value * PRICING_SNAPSHOT.fx.usdToInr);
+  const money = (value: number) => <MoneyPair value={value} />;
   const field = (
     label: string,
     value: string | number,
@@ -2336,14 +2332,11 @@ function PricingPage() {
                 commitment snapshot.
               </small>
             </label>
-            <label className="pricing-field">
-              <span>Display currency</span>
-              <select value={currency} onChange={(event) => setCurrency(event.target.value as "USD" | "INR")}>
-                <option value="USD">USD — authoritative</option>
-                <option value="INR">INR — converted estimate</option>
-              </select>
-              <small>Stored FX: 1 USD = ₹{PRICING_SNAPSHOT.fx.usdToInr}</small>
-            </label>
+            <div className="pricing-field currency-policy">
+              <span>Currency presentation</span>
+              <strong>USD + INR shown together</strong>
+              <small>1 USD = ₹{PRICING_SNAPSHOT.fx.usdToInr} · {PRICING_SNAPSHOT.fx.label}</small>
+            </div>
             {field(
               "Quantity",
               quantity,
@@ -2427,7 +2420,7 @@ function PricingPage() {
           <div className="pricing-assumptions">
             <p>Pricing: AWS snapshot {PRICING_SNAPSHOT_DATE}</p>
             <p>Region: {PRICING_SNAPSHOT.regions[region].label}</p>
-            <p>Currency: {currency}{currency === "INR" ? ` · converted at ₹${PRICING_SNAPSHOT.fx.usdToInr}/USD` : " · AWS source currency"}</p>
+            <p>Currency: USD and INR · 1 USD = ₹{PRICING_SNAPSHOT.fx.usdToInr}</p>
             <p>
               Monthly equivalent includes the selected annual commitment terms.
             </p>
@@ -2776,26 +2769,26 @@ function BillingPage({
         <Kpi
           icon="dollar"
           title="Latest total"
-          value={usd.format(latest.total)}
+          value={<MoneyPair value={latest.total} />}
           note={`${latest.month} ${latest.year} grand total`}
         />
         <Kpi
           icon="billing"
           title="Pre-tax"
-          value={usd.format(latest.preTax)}
-          note={`Tax ${usd.format(latest.total - latest.preTax)}`}
+          value={<MoneyPair value={latest.preTax} />}
+          note={`Tax ${dualMoneyText(latest.total - latest.preTax)}`}
         />
         <Kpi
           icon="arrow"
           title="Month over month"
           value={formatPercent(change, true)}
-          note={`${prior.month} ${prior.year} · ${usd.format(prior.total)}`}
+          note={`${prior.month} ${prior.year} · ${dualMoneyText(prior.total)}`}
           tone={change > 0 ? "warning" : "success"}
         />
         <Kpi
           icon="sigma"
           title="Six-month average"
-          value={usd.format(average(client.bills.map((b) => b.total)))}
+          value={<MoneyPair value={average(client.bills.map((b) => b.total))} />}
           note={`High ${high.month} · Low ${low.month}`}
         />
       </section>
@@ -2807,7 +2800,7 @@ function BillingPage({
               <div key={bill.month}>
                 <span>
                   <b>{bill.month} {bill.year}</b>
-                  <small>{usd.format(bill.total)}</small>
+                  <small><MoneyPair value={bill.total} compact /></small>
                 </span>
                 <i>
                   <b style={{ width: `${(bill.total / high.total) * 100}%` }} />
@@ -2835,12 +2828,12 @@ function BillingPage({
             <div className="legend">
               <p>
                 <i className="ec2" />
-                Elastic Compute Cloud <b>{usd.format(prior.topServiceCost)}</b>
+                Elastic Compute Cloud <b><MoneyPair value={prior.topServiceCost} compact /></b>
               </p>
               <p>
                 <i />
                 Other services & tax{" "}
-                <b>{usd.format(prior.total - prior.topServiceCost)}</b>
+                <b><MoneyPair value={prior.total - prior.topServiceCost} compact /></b>
               </p>
             </div>
           </div>
@@ -2854,7 +2847,7 @@ function BillingPage({
                 <small>Largest supported service line</small>
               </span>
               <b>
-                {usd.format(latest.topServiceCost)}
+                <MoneyPair value={latest.topServiceCost} />
                 <small>
                   {((latest.topServiceCost / latest.total) * 100).toFixed(1)}%
                   of {latest.month}
@@ -2870,7 +2863,7 @@ function BillingPage({
                 </small>
               </span>
               <b>
-                {usd.format(latest.total - latest.topServiceCost)}
+                <MoneyPair value={latest.total - latest.topServiceCost} />
                 <small>
                   {(100 - (latest.topServiceCost / latest.total) * 100).toFixed(
                     1,
@@ -2896,21 +2889,21 @@ function BillingPage({
               <span>◎</span>
               <b>
                 {high.month} was highest
-                <small>{usd.format(high.total)} grand total</small>
+                <small><MoneyPair value={high.total} compact /> grand total</small>
               </b>
             </p>
             <p>
               <span>⌖</span>
               <b>
                 {latest.topRegion} led regional charges
-                <small>{usd.format(latest.topRegionCost)} gross regional line{latest.topRegionCost > latest.preTax ? " · before account-level credits" : ""}</small>
+                <small><MoneyPair value={latest.topRegionCost} compact /> gross regional line{latest.topRegionCost > latest.preTax ? " · before account-level credits" : ""}</small>
               </b>
             </p>
             <p>
               <span>◌</span>
               <b>
                 {low.month} was lowest
-                <small>{usd.format(low.total)} grand total</small>
+                <small><MoneyPair value={low.total} compact /> grand total</small>
               </b>
             </p>
           </div>
@@ -3787,7 +3780,7 @@ function Kpi({
 }: {
   icon: IconName;
   title: string;
-  value: string;
+  value: React.ReactNode;
   note: string;
   tone?: string;
 }) {
@@ -3803,6 +3796,25 @@ function Kpi({
       </div>
     </article>
   );
+}
+
+function MoneyPair({ value, compact = false }: { value: number; compact?: boolean }) {
+  const inr = new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: compact ? 0 : 2,
+  }).format(value * PRICING_SNAPSHOT.fx.usdToInr);
+  return (
+    <span className={`money-pair${compact ? " compact" : ""}`} title={`AWS conversion rate: 1 USD = ₹${PRICING_SNAPSHOT.fx.usdToInr}`}>
+      <span className="money-primary">{usd.format(value)}</span>
+      <span className="money-secondary">{inr}</span>
+    </span>
+  );
+}
+
+function dualMoneyText(value: number): string {
+  const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(value * PRICING_SNAPSHOT.fx.usdToInr);
+  return `${usd.format(value)} / ${inr}`;
 }
 function PanelTitle({
   title,

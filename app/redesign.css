@@ -164,6 +164,17 @@ button:disabled { cursor: not-allowed; opacity: .62; transform: none!important; 
 @media (max-width:1000px) { .stratus-shell { grid-template-columns:78px minmax(0,1fr); }.brand>span:last-child,.nav-group>p,.managed-clients>p,.managed-clients button span,.sidebar-art { display:none; }.sidebar nav button { justify-content:center; padding:0; font-size:0; }.sidebar nav button>span { width:auto; }.managed-clients button { display:flex; justify-content:center; padding:5px; }.managed-clients b { display:none; }.portfolio-spend,.portfolio-cost,.portfolio-clients,.portfolio-attention,.portfolio-drivers,.portfolio-status { grid-column:1/-1; }.topbar { grid-template-columns:1fr auto; }.topbar .search { grid-column:1/-1; grid-row:2; }.outline-button { display:none; } }
 @media (max-width:680px) { .stratus-shell { display:block; }.sidebar { position:fixed; top:auto; right:0; bottom:0; left:0; z-index:70; display:block; width:auto; height:70px; padding:8px; overflow-x:auto; }.brand,.managed-clients { display:none; }.sidebar nav { display:flex; gap:5px; }.nav-group { display:flex; }.sidebar nav button { min-width:50px; }.content { padding:16px 12px 135px; }.org-kpis { grid-template-columns:1fr 1fr; }.portfolio-grid { grid-template-columns:1fr; }.portfolio-grid>.panel { grid-column:1; }.topbar { padding:14px 15px; }.topbar h1 { font-size:22px; }.directory-grid { grid-template-columns:1fr; }.pricing-drawer { width:100%; }.pricing-drawer .benchmark-grid { grid-template-columns:1fr; } }
 
+/* Dual-currency values keep USD prominent and INR adjacent without visual noise. */
+.money-pair { display:inline-grid; gap:2px; min-width:0; vertical-align:middle; line-height:1.08; font-variant-numeric:tabular-nums; }
+.money-pair .money-primary { color:inherit; font:inherit; white-space:nowrap; }
+.money-pair .money-secondary { color:var(--muted); font-size:.56em; font-weight:650; letter-spacing:0; white-space:nowrap; }
+.money-pair.compact { gap:1px; }
+.money-pair.compact .money-secondary { font-size:.72em; }
+.cost-client-list .money-pair,.legend .money-pair,.data-list .money-pair,.driver-list .money-pair { justify-items:end; text-align:right; }
+.stacked-column>.money-pair,.bar-column>.money-pair { justify-items:center; text-align:center; }
+.currency-policy { align-content:center; padding:9px 11px; border:1px solid var(--line); border-radius:10px; background:#fafcf9; }
+.currency-policy>strong { color:var(--ink-strong); font-size:12px; }
+
 /* Keep the pricing dialog as a self-contained compositor and scroll surface. */
 .pricing-drawer-backdrop { overflow:hidden; overscroll-behavior:none; backdrop-filter:none; touch-action:none; }
 .pricing-drawer { width:min(720px,96vw); height:100dvh; min-height:0; overflow:hidden; overscroll-behavior:none; contain:layout paint; backface-visibility:hidden; will-change:transform; }

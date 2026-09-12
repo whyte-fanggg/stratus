@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { evaluateBackupFreshness } from "../services/backups/freshness.ts";
-import { monthOverMonth, parseAwsBillText, parseUsdToCents } from "../services/billing/aws-bill-parser.ts";
+import { monthOverMonth, parseAwsBillText, parseAwsStatementAllocations, parseUsdToCents } from "../services/billing/aws-bill-parser.ts";
 import { STRATUS_CLIENTS, STRATUS_REGIONS, SYNC_INTERVALS } from "../services/config.ts";
 import { inferResourceRole } from "../services/aws/read-only-adapter.ts";
 import { shouldRetainObservedAt } from "../services/retention.ts";
@@ -50,6 +50,37 @@ test("AWS India GST tax invoices parse and reconcile in INR", () => {
   assert.equal(parsed.topService, "Amazon Elastic Compute Cloud");
   assert.equal(parsed.topServiceCents, 26_807_090);
   assert.equal(parsed.topRegion, "Unclassified");
+});
+
+test("AWS India account statements use linked allocation and exact statement FX", () => {
+  const parsed = parseAwsBillText(`Account number:\n254552067866\nAmazon Web Services Statement\nThis Account Summary is for the billing period August 1 - August 31 , 2026\nTotal for this statement in USD USD 6,718.46\nTotal for this statement (1 USD = 95.380550000 INR )\nActivity By Account\ninventrax (254552067866) USD 3,469.81\nSummary for Linked Account\ninventrax (254552067866) USD 3,469.81\nCharges USD 2,940.51\nTax USD 529.30\nAmazon Simple Storage Service USD 123.63\nAmazon Elastic Compute Cloud USD 2,810.55`);
+  assert.equal(parsed.currency, "USD");
+  assert.equal(parsed.fxUsdToInr, 95.38055);
+  assert.equal(parsed.totalCents, 346_981);
+  assert.equal(parsed.preTaxCents, 294_051);
+  assert.equal(parsed.taxCents, 52_930);
+  assert.equal(parsed.topService, "Amazon Elastic Compute Cloud");
+  assert.equal(parsed.topServiceCents, 281_055);
+});
+
+test("consolidated AWS statements expose every linked-account allocation", () => {
+  const parsed = parseAwsStatementAllocations(`Account number: 000000000000
+Amazon Web Services Statement
+This Account Summary is for the billing period August 1 - August 31 , 2026
+Total for this statement (1 USD = 95.380550000 INR )
+Summary for Linked Account
+inventrax (254552067866)USD 3,469.81
+ChargesUSD 2,940.51
+TaxUSD 529.30
+Amazon Elastic Compute CloudUSD 2,810.55
+Summary for Linked Account
+GCPL (768405430897)USD 1,698.53
+ChargesUSD 1,439.43
+TaxUSD 259.10
+Amazon Elastic Compute CloudUSD 1,300.00`);
+  assert.deepEqual(parsed.map((bill) => bill.accountId), ["254552067866", "768405430897"]);
+  assert.deepEqual(parsed.map((bill) => bill.totalCents), [346_981, 169_853]);
+  assert.ok(parsed.every((bill) => bill.fxUsdToInr === 95.38055));
 });
 
 test("uploaded billing replaces matching periods and retains a six-month window", () => {

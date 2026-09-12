@@ -68,7 +68,7 @@ export const PRICING_SNAPSHOT = {
     savingsPlans: "AWS Savings Plans DescribeSavingsPlansOfferingRates API, EC2Instance, shared tenancy",
     serviceBenchmarks: "Official AWS public service pricing pages reviewed 2026-09-06",
   },
-  fx: { usdToInr: 88.15, label: "Stored Stratus planning rate" },
+  fx: { usdToInr: 95.38055, label: "AWS August 2026 statement rate" },
   ec2: { windowsOnDemand, savingsPlans: { "ap-south-1": mumbaiSavings, "ap-south-2": hyderabadSavings }, sqlStandardLicensePerVcpuHour: 0.12, sqlMinimumVcpu: 4, partialUpfrontShare: 0.5 },
   regions: {
     "ap-south-1": { label: "Mumbai", ebsGp3Gb: 0.0912, ebsGp3Iops: 0.0057, ebsGp3ThroughputMibps: 0.0456, ebsSnapshotGb: 0.05, s3StandardGb: 0.025, s3StandardIaGb: 0.0138 },

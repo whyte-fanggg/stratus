@@ -7,6 +7,7 @@ export type UploadedBillingRecord = {
   monthKey: string;
   year: number;
   currency?: "USD" | "INR";
+  fxUsdToInr?: number | null;
   totalCents: number;
   preTaxCents: number;
   topService: string;
@@ -35,7 +36,7 @@ export function mergeUploadedBilling(records: UploadedBillingRecord[]): BillingB
       if (number) periods.set(`2026-${number}`, { ...bill });
     }
     for (const record of records.filter((item) => item.client === clientName)) {
-      const toUsd = record.currency === "INR" ? 1 / PRICING_SNAPSHOT.fx.usdToInr : 1;
+      const toUsd = record.currency === "INR" ? 1 / (record.fxUsdToInr ?? PRICING_SNAPSHOT.fx.usdToInr) : 1;
       periods.set(record.monthKey, {
         month: record.month,
         year: record.year,
